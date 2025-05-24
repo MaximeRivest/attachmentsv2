@@ -237,12 +237,32 @@ class VerbFunction:
     
     def _apply_with_args(self, att: Attachment, *args, **kwargs):
         """Apply the function with additional arguments."""
-        # For modifiers with command arguments, update the attachment commands
-        if args and hasattr(att, 'commands'):
-            # Assume first argument is the command value for this verb
-            att.commands[self.name] = str(args[0])
         
-        return self.func(att)
+        # Check if the function can accept additional arguments
+        import inspect
+        sig = inspect.signature(self.func)
+        params = list(sig.parameters.values())
+        
+        # Check if this is an adapter (has *args, **kwargs) vs modifier/presenter (fixed params)
+        has_var_args = any(p.kind == p.VAR_POSITIONAL for p in params)
+        has_var_kwargs = any(p.kind == p.VAR_KEYWORD for p in params)
+        
+        if has_var_args and has_var_kwargs:
+            # This is an adapter - pass arguments directly
+            return self.func(att, *args, **kwargs)
+        else:
+            # This is a modifier/presenter - set commands and call with minimal args
+            if args and hasattr(att, 'commands'):
+                # Assume first argument is the command value for this verb
+                att.commands[self.name] = str(args[0])
+            
+            # If function only takes 1 parameter (just att) or 2 parameters (att + obj type),
+            # don't pass additional args - the commands are already set
+            if len(params) <= 2:
+                return self.func(att)
+            else:
+                # Function can take additional arguments
+                return self.func(att, *args, **kwargs)
     
     def __or__(self, other: Union[Callable, Pipeline]) -> Pipeline:
         """Create a pipeline when using | operator."""
@@ -335,11 +355,16 @@ class VerbNamespace:
         """Create a wrapper for adapter functions."""
         adapter_fn = self._registry[name]
         
-        @wraps(adapter_fn)
+        # Don't use @wraps here because it copies the original function's signature,
+        # but we need to preserve the *args, **kwargs signature for VerbFunction detection
         def wrapper(att: Attachment, *args, **kwargs):
             # Call the adapter and return result directly (exit the attachment pipeline)
             result = adapter_fn(att, *args, **kwargs)
             return result
+        
+        # Manually copy some attributes without affecting the signature
+        wrapper.__name__ = getattr(adapter_fn, '__name__', name)
+        wrapper.__doc__ = getattr(adapter_fn, '__doc__', None)
         
         return wrapper
 

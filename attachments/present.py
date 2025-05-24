@@ -360,3 +360,29 @@ def text(att: Attachment) -> Attachment:
 def images(att: Attachment) -> Attachment:
     """Fallback images presenter."""
     return att
+
+
+@presenter  
+def truncate(att: Attachment) -> Attachment:
+    """Truncate the text content to a maximum number of characters."""
+    # Check for truncate in commands (set by VerbFunction when called with args)
+    if 'truncate' not in att.commands:
+        return att
+    
+    try:
+        truncate_value = int(att.commands['truncate'])
+    except (ValueError, TypeError):
+        return att
+    
+    # Apply the truncation if we have text
+    if att.text and len(att.text) > truncate_value:
+        original_length = len(att.text)
+        att.text = att.text[:truncate_value]
+        # Add metadata about the truncation
+        att.metadata.update({
+            'text_truncated': True,
+            'original_length': original_length,
+            'truncated_length': truncate_value
+        })
+    
+    return att

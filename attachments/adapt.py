@@ -47,10 +47,16 @@ def claude(att: Attachment, prompt: str = "") -> List[Dict[str, Any]]:
     """Adapt for Claude API."""
     content = []
     
-    if prompt and att.text:
-        content.append({"type": "text", "text": f"{prompt}\n\n{att.text}"})
-    elif prompt:
-        content.append({"type": "text", "text": prompt})
+    # Check for prompt in commands (from DSL)
+    dsl_prompt = att.commands.get('prompt', '')
+    
+    # Combine prompts: parameter prompt takes precedence, DSL prompt as fallback
+    effective_prompt = prompt or dsl_prompt
+    
+    if effective_prompt and att.text:
+        content.append({"type": "text", "text": f"{effective_prompt}\n\n{att.text}"})
+    elif effective_prompt:
+        content.append({"type": "text", "text": effective_prompt})
     elif att.text:
         content.append({"type": "text", "text": att.text})
     
