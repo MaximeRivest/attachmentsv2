@@ -1,9 +1,86 @@
 from typing import Any, Dict, List, Optional, Union, Callable, get_type_hints
-from functools import wraps
+from functools import wraps, partial
 import re
 import base64
 import io
 from pathlib import Path
+
+class Pipeline:
+    """A callable pipeline that can be applied to attachments."""
+    
+    def __init__(self, steps: List[Callable] = None, fallback_pipelines: List['Pipeline'] = None):
+        self.steps = steps or []
+        self.fallback_pipelines = fallback_pipelines or []
+    
+    def __or__(self, other: Union[Callable, 'Pipeline']) -> 'Pipeline':
+        """Chain this pipeline with another step or pipeline."""
+        if isinstance(other, Pipeline):
+            # If both are pipelines, create a new pipeline with fallback logic
+            if self.steps and other.steps:
+                # This is chaining two complete pipelines - treat as fallback
+                return Pipeline(self.steps, [other] + other.fallback_pipelines)
+            elif not self.steps:
+                # If self is empty, just return other
+                return other
+            else:
+                # Concatenate steps
+                return Pipeline(self.steps + other.steps, other.fallback_pipelines)
+        else:
+            # Adding a single step to the pipeline
+            return Pipeline(self.steps + [other], self.fallback_pipelines)
+    
+    def __call__(self, input_: Union[str, 'Attachment']) -> Any:
+        """Apply the pipeline to an input."""
+        if isinstance(input_, str):
+            result = Attachment(input_)
+        else:
+            result = input_
+        
+        # Try the main pipeline first
+        try:
+            return self._execute_steps(result, self.steps)
+        except Exception as e:
+            # If the main pipeline fails, try fallback pipelines
+            for fallback in self.fallback_pipelines:
+                try:
+                    return fallback(input_)
+                except:
+                    continue
+            # If all pipelines fail, raise the original exception
+            raise e
+    
+    def _execute_steps(self, result: 'Attachment', steps: List[Callable]) -> Any:
+        """Execute a list of steps on an attachment."""
+        for step in steps:
+            result = step(result)
+            if result is None:
+                # If step returns None, keep the previous result
+                continue
+            if not isinstance(result, Attachment):
+                # If step returns something else (like an adapter result), return it directly
+                # This allows adapters to "exit" the pipeline and return their result
+                return result
+        
+        return result
+    
+    def __getattr__(self, name: str):
+        """Allow calling adapters as methods on pipelines."""
+        if name in _adapters:
+            def adapter_method(input_: Union[str, 'Attachment'], *args, **kwargs):
+                # Apply pipeline first, then adapter
+                result = self(input_)
+                adapter_fn = _adapters[name]
+                return adapter_fn(result, *args, **kwargs)
+            return adapter_method
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+    
+    def __repr__(self) -> str:
+        step_names = [getattr(step, '__name__', str(step)) for step in self.steps]
+        main_pipeline = f"Pipeline({' | '.join(step_names)})"
+        if self.fallback_pipelines:
+            fallback_names = [repr(fp) for fp in self.fallback_pipelines]
+            return f"{main_pipeline} with fallbacks: [{', '.join(fallback_names)}]"
+        return main_pipeline
 
 class Attachment:
     """Simple container for file processing."""
@@ -33,12 +110,28 @@ class Attachment:
         path = re.sub(r'\[([^:]+):([^\]]+)\]', extract_command, self.attachy).strip()
         return path, commands
     
-    def __or__(self, verb: Callable) -> 'Attachment':
-        result = verb(self)
-        if result is None:
-            result = self
-        result.pipeline.append(getattr(verb, '__name__', str(verb)))
-        return result
+    def __or__(self, verb: Union[Callable, Pipeline]) -> Union['Attachment', Pipeline]:
+        """Support both immediate application and pipeline creation."""
+        if isinstance(verb, Pipeline):
+            # Apply pipeline to this attachment
+            return verb(self)
+        else:
+            # Apply single verb
+            result = verb(self)
+            if result is None:
+                result = self
+            if isinstance(result, Attachment):
+                result.pipeline.append(getattr(verb, '__name__', str(verb)))
+            return result
+    
+    def __getattr__(self, name: str):
+        """Allow calling adapters as methods on attachments."""
+        if name in _adapters:
+            def adapter_method(*args, **kwargs):
+                adapter_fn = _adapters[name]
+                return adapter_fn(self, *args, **kwargs)
+            return adapter_method
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
     
     def __repr__(self) -> str:
         return f"Attachment(path='{self.path}', text={len(self.text)} chars, images={len(self.images)}, pipeline={self.pipeline})"
@@ -112,18 +205,70 @@ def adapter(func):
 
 # --- VERB NAMESPACES ---
 
+class VerbFunction:
+    """A wrapper for verb functions that supports both direct calls and pipeline creation."""
+    
+    def __init__(self, func: Callable, name: str, args=None, kwargs=None, is_loader=False):
+        self.func = func
+        self.name = name
+        self.__name__ = name
+        self.args = args or ()
+        self.kwargs = kwargs or {}
+        self.is_loader = is_loader
+    
+    def __call__(self, *args, **kwargs) -> Union[Attachment, 'VerbFunction']:
+        """Support both att | verb() and verb(args) | other_verb patterns."""
+        if len(args) == 1 and isinstance(args[0], Attachment) and not kwargs and not self.args and not self.kwargs:
+            # Direct application: verb(attachment)
+            return self.func(args[0])
+        elif len(args) == 1 and isinstance(args[0], Attachment) and (kwargs or self.args or self.kwargs):
+            # Apply with stored or provided arguments
+            return self._apply_with_args(args[0], *(self.args + args[1:]), **{**self.kwargs, **kwargs})
+        elif len(args) == 1 and isinstance(args[0], str) and self.is_loader and not kwargs and not self.args and not self.kwargs:
+            # Special case: loader called with string path - create attachment and apply
+            att = Attachment(args[0])
+            return self.func(att)
+        elif args or kwargs:
+            # Partial application: verb(arg1, arg2) returns a new VerbFunction with stored args
+            return VerbFunction(self.func, self.name, self.args + args, {**self.kwargs, **kwargs}, self.is_loader)
+        else:
+            # No args, return self for pipeline creation
+            return self
+    
+    def _apply_with_args(self, att: Attachment, *args, **kwargs):
+        """Apply the function with additional arguments."""
+        # For modifiers with command arguments, update the attachment commands
+        if args and hasattr(att, 'commands'):
+            # Assume first argument is the command value for this verb
+            att.commands[self.name] = str(args[0])
+        
+        return self.func(att)
+    
+    def __or__(self, other: Union[Callable, Pipeline]) -> Pipeline:
+        """Create a pipeline when using | operator."""
+        return Pipeline([self]) | other
+    
+    def __repr__(self) -> str:
+        args_str = ""
+        if self.args or self.kwargs:
+            args_str = f"({', '.join(map(str, self.args))}{', ' if self.args and self.kwargs else ''}{', '.join(f'{k}={v}' for k, v in self.kwargs.items())})"
+        return f"VerbFunction({self.name}{args_str})"
+
 class VerbNamespace:
     def __init__(self, registry):
         self._registry = registry
     
-    def __getattr__(self, name: str) -> Callable:
+    def __getattr__(self, name: str) -> VerbFunction:
         if name in self._registry:
             if isinstance(self._registry[name], tuple):
-                return self._make_loader_wrapper(name)
+                wrapper = self._make_loader_wrapper(name)
+                return VerbFunction(wrapper, name, is_loader=True)
             elif isinstance(self._registry[name], list):
-                return self._make_dispatch_wrapper(name)
+                wrapper = self._make_dispatch_wrapper(name)
+                return VerbFunction(wrapper, name)
             else:
-                return self._registry[name]
+                wrapper = self._make_adapter_wrapper(name)
+                return VerbFunction(wrapper, name)
         
         raise AttributeError(f"No verb '{name}' registered")
     
@@ -185,6 +330,18 @@ class VerbNamespace:
             return att
         
         return wrapper
+    
+    def _make_adapter_wrapper(self, name: str):
+        """Create a wrapper for adapter functions."""
+        adapter_fn = self._registry[name]
+        
+        @wraps(adapter_fn)
+        def wrapper(att: Attachment, *args, **kwargs):
+            # Call the adapter and return result directly (exit the attachment pipeline)
+            result = adapter_fn(att, *args, **kwargs)
+            return result
+        
+        return wrapper
 
 
 class SmartVerbNamespace(VerbNamespace):
@@ -223,12 +380,4 @@ def A(path: str) -> Attachment:
     """Short alias for attach()."""
     return Attachment(path)
 
-
-def regenerate_stubs():
-    """Legacy function - no longer needed."""
-    print("📝 Stub generation is no longer needed!")
-    print("✨ SmartVerbNamespace now provides autocomplete automatically")
-
-
-# Helper functions for convenient attachment creation
 

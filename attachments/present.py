@@ -110,6 +110,21 @@ def text(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
     return att
 
 
+# TEXT PRESENTERS for BeautifulSoup
+@presenter
+def text(att: Attachment, soup: 'bs4.BeautifulSoup') -> Attachment:
+    """Extract text from BeautifulSoup object."""
+    att.text += soup.get_text(strip=True)
+    return att
+
+
+@presenter
+def html(att: Attachment, soup: 'bs4.BeautifulSoup') -> Attachment:
+    """Get formatted HTML from BeautifulSoup object."""
+    att.text += soup.prettify()
+    return att
+
+
 # IMAGES PRESENTERS
 @presenter
 def images(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
@@ -279,6 +294,53 @@ def xml(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
 
 
 # FALLBACK PRESENTERS
+@presenter
+def head(att: Attachment) -> Attachment:
+    """Fallback head presenter for non-DataFrame objects."""
+    if hasattr(att._obj, 'head'):
+        try:
+            head_result = att._obj.head()
+            att.text += f"\n## Preview\n\n{str(head_result)}\n\n"
+        except:
+            att.text += f"\n## Preview\n\n{str(att._obj)[:200]}\n\n"
+    else:
+        att.text += f"\n## Preview\n\n{str(att._obj)[:200]}\n\n"
+    return att
+
+
+@presenter
+def metadata(att: Attachment) -> Attachment:
+    """Add attachment metadata to text."""
+    try:
+        meta_text = f"\n## Metadata\n\n"
+        for key, value in att.metadata.items():
+            meta_text += f"- **{key}**: {value}\n"
+        if not att.metadata:
+            meta_text += "*No metadata available*\n"
+        att.text += meta_text + "\n"
+    except Exception as e:
+        att.text += f"\n*Error displaying metadata: {e}*\n\n"
+    return att
+
+
+@presenter
+def summary(att: Attachment) -> Attachment:
+    """Fallback summary presenter for non-DataFrame objects."""
+    try:
+        summary_text = f"\n## Object Summary\n\n"
+        summary_text += f"- **Type**: {type(att._obj).__name__}\n"
+        if hasattr(att._obj, '__len__'):
+            try:
+                summary_text += f"- **Length**: {len(att._obj)}\n"
+            except:
+                pass
+        summary_text += f"- **String representation**: {str(att._obj)[:100]}...\n"
+        att.text += summary_text + "\n"
+    except Exception as e:
+        att.text += f"\n*Error generating summary: {e}*\n\n"
+    return att
+
+
 @presenter
 def markdown(att: Attachment) -> Attachment:
     """Fallback markdown presenter for unknown types."""

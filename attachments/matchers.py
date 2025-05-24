@@ -1,5 +1,12 @@
 from .core import Attachment
+import re
+
 # --- MATCHERS ---
+
+def url_match(att: 'Attachment') -> bool:
+    """Check if the attachment path looks like a URL."""
+    url_pattern = r'^https?://'
+    return bool(re.match(url_pattern, att.path))
 
 def csv_match(att: 'Attachment') -> bool:
     return att.path.endswith('.csv')

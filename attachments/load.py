@@ -2,6 +2,31 @@ from . import matchers
 from .core import Attachment, loader
 
 # --- LOADERS ---
+@loader(match=matchers.url_match)
+def url_to_bs4(att: Attachment) -> Attachment:
+    """Load URL content and parse with BeautifulSoup."""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        
+        response = requests.get(att.path, timeout=10)
+        response.raise_for_status()
+        
+        # Parse with BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Store the soup object
+        att._obj = soup
+        # Store some metadata
+        att.metadata.update({
+            'content_type': response.headers.get('content-type', ''),
+            'status_code': response.status_code,
+        })
+        
+        return att
+    except ImportError:
+        raise ImportError("requests and beautifulsoup4 are required for URL loading. Install with: pip install requests beautifulsoup4")
+
 @loader(match=matchers.csv_match)
 def csv_to_pandas(att: Attachment) -> Attachment:
     """Load CSV into pandas DataFrame."""

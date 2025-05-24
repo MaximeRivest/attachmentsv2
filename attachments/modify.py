@@ -83,3 +83,47 @@ def select(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
             pass
     return att
 
+
+@modifier
+def select(att: Attachment, soup: 'bs4.BeautifulSoup') -> Attachment:
+    """
+    Generic select modifier that works with different object types.
+    Can be used with both command syntax and direct arguments.
+    """
+    # Check if we have a select command from attachy syntax or direct argument
+    if 'select' not in att.commands:
+        return att
+    
+    selector = att.commands['select']
+    
+    # If we have a BeautifulSoup object, handle CSS selection
+    if att._obj and hasattr(att._obj, 'select'):
+        # Use CSS selector to find matching elements
+        selected_elements = att._obj.select(selector)
+        
+        if not selected_elements:
+            # If no elements found, create empty soup
+            from bs4 import BeautifulSoup
+            new_soup = BeautifulSoup("", 'html.parser')
+        elif len(selected_elements) == 1:
+            # If single element, use it directly
+            from bs4 import BeautifulSoup
+            new_soup = BeautifulSoup(str(selected_elements[0]), 'html.parser')
+        else:
+            # If multiple elements, wrap them in a container
+            from bs4 import BeautifulSoup
+            container_html = ''.join(str(elem) for elem in selected_elements)
+            new_soup = BeautifulSoup(f"<div>{container_html}</div>", 'html.parser')
+        
+        # Update the attachment with selected content
+        att._obj = new_soup
+        
+        # Update metadata to track the selection
+        att.metadata.update({
+            'selector': selector,
+            'selected_count': len(selected_elements),
+            'selection_applied': True
+        })
+    
+    return att
+
