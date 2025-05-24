@@ -82,6 +82,43 @@ class Pipeline:
             return f"{main_pipeline} with fallbacks: [{', '.join(fallback_names)}]"
         return main_pipeline
 
+class AdditivePipeline:
+    """A pipeline that applies presenters additively, preserving existing content."""
+    
+    def __init__(self, steps: List[Callable] = None):
+        self.steps = steps or []
+    
+    def __call__(self, input_: Union[str, 'Attachment']) -> 'Attachment':
+        """Apply additive pipeline - each step adds to existing content."""
+        if isinstance(input_, str):
+            result = Attachment(input_)
+        else:
+            result = input_
+        
+        for step in self.steps:
+            # Apply each step to the original attachment
+            # Each presenter should preserve existing content and add new content
+            result = step(result)
+            if result is None:
+                continue
+        
+        return result
+    
+    def __add__(self, other: Union[Callable, 'AdditivePipeline']) -> 'AdditivePipeline':
+        """Chain additive pipelines."""
+        if isinstance(other, AdditivePipeline):
+            return AdditivePipeline(self.steps + other.steps)
+        else:
+            return AdditivePipeline(self.steps + [other])
+    
+    def __or__(self, other: Union[Callable, Pipeline]) -> Pipeline:
+        """Convert to regular pipeline when using | operator."""
+        return Pipeline([self]) | other
+    
+    def __repr__(self) -> str:
+        step_names = [getattr(step, '__name__', str(step)) for step in self.steps]
+        return f"AdditivePipeline({' + '.join(step_names)})"
+
 class Attachment:
     """Simple container for file processing."""
     
@@ -133,6 +170,15 @@ class Attachment:
             return adapter_method
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
     
+    def __add__(self, other: Union[Callable, 'Pipeline']) -> 'Attachment':
+        """Support additive composition for presenters: present.text + present.images"""
+        if isinstance(other, (VerbFunction, Pipeline)):
+            # Apply the presenter additively (should preserve existing content)
+            result = other(self)
+            return result if result is not None else self
+        else:
+            raise TypeError(f"Cannot add {type(other)} to Attachment")
+    
     def __repr__(self) -> str:
         return f"Attachment(path='{self.path}', text={len(self.text)} chars, images={len(self.images)}, pipeline={self.pipeline})"
 
@@ -143,6 +189,7 @@ _loaders = {}
 _modifiers = {}
 _presenters = {}
 _adapters = {}
+_refiners = {}
 
 
 def loader(match: Callable[[Attachment], bool]):
@@ -200,6 +247,12 @@ def presenter(func):
 def adapter(func):
     """Register an adapter function."""
     _adapters[func.__name__] = func
+    return func
+
+
+def refiner(func):
+    """Register a refiner function that operates on presented content."""
+    _refiners[func.__name__] = func
     return func
 
 
@@ -267,6 +320,10 @@ class VerbFunction:
     def __or__(self, other: Union[Callable, Pipeline]) -> Pipeline:
         """Create a pipeline when using | operator."""
         return Pipeline([self]) | other
+    
+    def __add__(self, other: Union[Callable, 'VerbFunction', Pipeline]) -> 'AdditivePipeline':
+        """Create an additive pipeline when using + operator."""
+        return AdditivePipeline([self, other])
     
     def __repr__(self) -> str:
         args_str = ""
