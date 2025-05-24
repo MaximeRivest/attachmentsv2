@@ -1,4 +1,5 @@
-from .core import Attachment, attach, A, Pipeline, SmartVerbNamespace, _loaders, _modifiers, _presenters, _adapters, _refiners, loader, modifier, presenter, adapter, refiner
+from .core import Attachment, AttachmentCollection, attach, A, Pipeline, SmartVerbNamespace, _loaders, _modifiers, _presenters, _adapters, _refiners, loader, modifier, presenter, adapter, refiner
+from .simple import Attachments, process
 
 
 # Import the individual modules to ensure functions are registered
@@ -19,6 +20,7 @@ present = SmartVerbNamespace(_presenters)
 adapt = SmartVerbNamespace(_adapters)
 refine = SmartVerbNamespace(_refiners)
 
-__all__ = ["Attachment", "attach", "A", "Pipeline",
+__all__ = ["Attachment", "AttachmentCollection", "attach", "A", "Pipeline",
            "load", "modify", "present", "adapt", "refine", "data",
-           "loader", "modifier", "presenter", "adapter", "refiner"]
+           "loader", "modifier", "presenter", "adapter", "refiner",
+           "Attachments", "process"]

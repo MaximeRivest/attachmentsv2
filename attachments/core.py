@@ -119,6 +119,76 @@ class AdditivePipeline:
         step_names = [getattr(step, '__name__', str(step)) for step in self.steps]
         return f"AdditivePipeline({' + '.join(step_names)})"
 
+class AttachmentCollection:
+    """A collection of attachments that supports vectorized operations."""
+    
+    def __init__(self, attachments: List['Attachment']):
+        self.attachments = attachments or []
+    
+    def __or__(self, operation: Union[Callable, Pipeline]) -> Union['AttachmentCollection', 'Attachment']:
+        """Apply operation - vectorize or reduce based on operation type."""
+        
+        # Check if this is a reducing operation (operates on collections)
+        if self._is_reducer(operation):
+            # Apply to the collection as a whole (reduction)
+            return operation(self)
+        else:
+            # Apply to each attachment (vectorization)
+            results = []
+            for att in self.attachments:
+                result = operation(att)
+                if result is not None:
+                    results.append(result)
+            return AttachmentCollection(results)
+    
+    def __add__(self, other: Union[Callable, Pipeline]) -> 'AttachmentCollection':
+        """Apply additive operation to each attachment."""
+        results = []
+        for att in self.attachments:
+            result = att + other
+            if result is not None:
+                results.append(result)
+        return AttachmentCollection(results)
+    
+    def _is_reducer(self, operation) -> bool:
+        """Check if an operation is a reducer (combines multiple attachments)."""
+        # Check if it's a refiner that works on collections
+        if hasattr(operation, 'name'):
+            reducing_operations = {
+                'tile_images', 'combine_images', 'merge_text', 
+                'claude', 'openai_chat', 'openai_response'  # Adapters are always reducers
+            }
+            return operation.name in reducing_operations
+        return False
+    
+    def to_attachment(self) -> 'Attachment':
+        """Convert collection to single attachment by combining content."""
+        if not self.attachments:
+            return Attachment("")
+        
+        # Create a new attachment that combines all content
+        combined = Attachment("")
+        combined.text = "\n\n".join(att.text for att in self.attachments if att.text)
+        combined.images = [img for att in self.attachments for img in att.images]
+        combined.audio = [audio for att in self.attachments for audio in att.audio]
+        
+        # Combine metadata
+        combined.metadata = {
+            'collection_size': len(self.attachments),
+            'combined_from': [att.path for att in self.attachments]
+        }
+        
+        return combined
+    
+    def __len__(self) -> int:
+        return len(self.attachments)
+    
+    def __getitem__(self, index: int) -> 'Attachment':
+        return self.attachments[index]
+    
+    def __repr__(self) -> str:
+        return f"AttachmentCollection({len(self.attachments)} attachments)"
+
 class Attachment:
     """Simple container for file processing."""
     

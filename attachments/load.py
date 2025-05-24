@@ -1,5 +1,8 @@
+"""Loader functions that transform files into attachment objects."""
+
 from . import matchers
-from .core import Attachment, loader
+from .core import Attachment, loader, AttachmentCollection
+import io
 
 # --- LOADERS ---
 @loader(match=matchers.url_match)
@@ -98,3 +101,47 @@ def text_to_string(att: Attachment) -> Attachment:
         att._obj = content
         att.text = content
     return att
+
+
+@loader(match=matchers.zip_match)
+def zip_to_images(att: Attachment) -> 'AttachmentCollection':
+    """Load ZIP file containing images into AttachmentCollection."""
+    try:
+        import zipfile
+        from PIL import Image
+        from .core import AttachmentCollection, Attachment
+        
+        attachments = []
+        
+        with zipfile.ZipFile(att.path, 'r') as zip_file:
+            for file_info in zip_file.filelist:
+                if file_info.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.heic', '.heif')):
+                    # Create attachment for each image
+                    img_att = Attachment(file_info.filename)
+                    
+                    # Copy commands from original attachment (for vectorized processing)
+                    img_att.commands = att.commands.copy()
+                    
+                    # Load image from zip
+                    with zip_file.open(file_info.filename) as img_file:
+                        img_data = img_file.read()
+                        img = Image.open(io.BytesIO(img_data))
+                        img_att._obj = img
+                        
+                        # Store metadata
+                        img_att.metadata.update({
+                            'format': getattr(img, 'format', 'Unknown'),
+                            'size': getattr(img, 'size', (0, 0)),
+                            'mode': getattr(img, 'mode', 'Unknown'),
+                            'from_zip': att.path,
+                            'zip_filename': file_info.filename
+                        })
+                    
+                    attachments.append(img_att)
+        
+        return AttachmentCollection(attachments)
+        
+    except ImportError:
+        raise ImportError("Pillow is required for image processing. Install with: pip install Pillow")
+    except Exception as e:
+        raise ValueError(f"Could not load ZIP file: {e}")

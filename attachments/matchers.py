@@ -23,3 +23,7 @@ def image_match(att: 'Attachment') -> bool:
 def text_match(att: 'Attachment') -> bool:
     return att.path.endswith(('.txt', '.md', '.log', '.json', '.py'))
 
+def zip_match(att: 'Attachment') -> bool:
+    """Check if the attachment path is a ZIP file."""
+    return att.path.lower().endswith('.zip')
+

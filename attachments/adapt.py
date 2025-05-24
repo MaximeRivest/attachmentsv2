@@ -1,11 +1,19 @@
-from typing import List, Dict, Any
-from .core import Attachment, adapter
+from typing import List, Dict, Any, Union
+from .core import Attachment, AttachmentCollection, adapter
 
 # --- ADAPTERS ---
 
+def _handle_collection(input_obj: Union[Attachment, AttachmentCollection]) -> Attachment:
+    """Convert AttachmentCollection to single Attachment for adapter processing."""
+    if isinstance(input_obj, AttachmentCollection):
+        return input_obj.to_attachment()
+    return input_obj
+
 @adapter
-def openai_chat(att: Attachment, prompt: str = "") -> List[Dict[str, Any]]:
+def openai_chat(input_obj: Union[Attachment, AttachmentCollection], prompt: str = "") -> List[Dict[str, Any]]:
     """Adapt for OpenAI chat completion API."""
+    att = _handle_collection(input_obj)
+    
     content = []
     if prompt:
         content.append({"type": "text", "text": prompt})
@@ -23,8 +31,10 @@ def openai_chat(att: Attachment, prompt: str = "") -> List[Dict[str, Any]]:
     return [{"role": "user", "content": content}]
 
 @adapter
-def openai_response(att: Attachment, prompt: str = "") -> List[Dict[str, Any]]:
+def openai_response(input_obj: Union[Attachment, AttachmentCollection], prompt: str = "") -> List[Dict[str, Any]]:
     """Adapt for OpenAI chat completion API."""
+    att = _handle_collection(input_obj)
+    
     content = []
     if prompt:
         content.append({"type": "text", "text": prompt})
@@ -43,8 +53,10 @@ def openai_response(att: Attachment, prompt: str = "") -> List[Dict[str, Any]]:
 
 
 @adapter
-def claude(att: Attachment, prompt: str = "") -> List[Dict[str, Any]]:
+def claude(input_obj: Union[Attachment, AttachmentCollection], prompt: str = "") -> List[Dict[str, Any]]:
     """Adapt for Claude API."""
+    att = _handle_collection(input_obj)
+    
     content = []
     
     # Check for prompt in commands (from DSL)
