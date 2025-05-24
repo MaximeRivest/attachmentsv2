@@ -18,7 +18,7 @@ def pptx_match(att: 'Attachment') -> bool:
     return att.path.endswith(('.pptx', '.ppt'))
 
 def image_match(att: 'Attachment') -> bool:
-    return att.path.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp'))
+    return att.path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.heic', '.heif'))
 
 def text_match(att: 'Attachment') -> bool:
     return att.path.endswith(('.txt', '.md', '.log', '.json', '.py'))

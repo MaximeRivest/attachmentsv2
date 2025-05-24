@@ -303,10 +303,15 @@ class VerbNamespace:
             else:
                 att = input_
             
+            # Skip loading if already loaded (default behavior for all loaders)
+            if att._obj is not None:
+                return att
+            
             if match_fn(att):
                 return loader_fn(att)
             else:
-                raise ValueError(f"Loader {name} cannot handle: {att.path}")
+                # Skip gracefully if this loader doesn't match - enables chaining
+                return att
         
         return wrapper
     
