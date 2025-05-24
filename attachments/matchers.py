@@ -14,5 +14,5 @@ def image_match(att: 'Attachment') -> bool:
     return att.path.endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp'))
 
 def text_match(att: 'Attachment') -> bool:
-    return att.path.endswith(('.txt', '.md', '.log'))
+    return att.path.endswith(('.txt', '.md', '.log', '.json', '.py'))
 

@@ -42,4 +42,7 @@ Homepage = "https://github.com/yourusername/attachments"
 Repository = "https://github.com/yourusername/attachments"
 
 [tool.setuptools]
-packages = ["attachments"] 
+packages = ["attachments"]
+
+[tool.setuptools.package-data]
+attachments = ["data/*"] 

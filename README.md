@@ -12,6 +12,32 @@ result = attach("data.csv") | load.csv_to_pandas | present.markdown
 print(result.text)
 ```
 
+## 📚 Sample Data
+
+The package includes sample data files for tutorials and experimentation:
+
+```python
+from attachments import attach, load, present, data
+
+# List available sample files
+print(data.list_samples())  # ['test.csv', 'sample.json', 'sample.txt']
+
+# Get path to specific sample file
+csv_path = data.get_sample_path("test.csv")
+json_path = data.get_sample_path("sample.json")
+txt_path = data.get_sample_path("sample.txt")
+
+# Use in pipelines
+result = attach(csv_path) | load.csv_to_pandas | present.markdown
+result = attach(txt_path) | load.text_to_string | present.markdown
+result = attach(json_path) | load.text_to_string | present.markdown
+```
+
+The sample files include:
+- **`test.csv`**: Simple CSV with user data (name, age, city)
+- **`sample.json`**: JSON with structured user data and metadata
+- **`sample.txt`**: Text file explaining the library features
+
 ## ✨ Autocomplete Support
 
 This package provides **excellent autocomplete in Jupyter and IPython**:

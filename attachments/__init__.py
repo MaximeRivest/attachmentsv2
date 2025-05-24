@@ -7,10 +7,13 @@ from . import present as _present_module
 from . import adapt as _adapt_module
 from . import matchers as _matchers_module
 
+# Import data module for sample data access
+from . import data
+
 # Create the namespace instances after functions are registered
 load = SmartVerbNamespace(_loaders)
 modify = SmartVerbNamespace(_modifiers)
 present = SmartVerbNamespace(_presenters)
 adapt = SmartVerbNamespace(_adapters)
 
-__all__ = ["Attachment", "attach", "A", "load", "modify", "present", "adapt"]
+__all__ = ["Attachment", "attach", "A", "load", "modify", "present", "adapt", "data"]

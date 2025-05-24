@@ -172,13 +172,16 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-# Development and testing files
+# Development and testing files (but not package sample data)
 debug_*.py
 test_*.py
 *_backup.*
 *_old.*
 *.tmp
 *.temp
+
+# But include sample data in package
+!attachments/data/
 
 # Documentation artifacts  
 att.txt
