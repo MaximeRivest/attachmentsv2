@@ -172,6 +172,11 @@ class Attachments:
             all_images.extend(real_images)
         return all_images
     
+    @property
+    def text(self) -> str:
+        """Return concatenated text from all attachments."""
+        return str(self)  # Use our formatted __str__ method which already does this properly
+    
     @property 
     def metadata(self) -> dict:
         """Return combined metadata from all processed files."""
@@ -197,16 +202,44 @@ class Attachments:
         """Return number of processed files/attachments."""
         return len(self.attachments)
     
+    def __getitem__(self, index: int) -> Attachment:
+        """Make Attachments indexable like a list."""
+        return self.attachments[index]
+    
+    def __iter__(self):
+        """Make Attachments iterable."""
+        return iter(self.attachments)
+    
     def __repr__(self) -> str:
         """Detailed representation for debugging."""
-        file_types = []
+        if not self.attachments:
+            return "Attachments(empty)"
+            
+        file_info = []
         for att in self.attachments:
+            # Get file extension or type
             if att.path:
                 ext = att.path.split('.')[-1].lower() if '.' in att.path else 'unknown'
-                file_types.append(ext)
+            else:
+                ext = 'unknown'
+            
+            # Summarize content
+            text_len = len(att.text) if att.text else 0
+            img_count = len([img for img in att.images if img and not img.endswith('_placeholder')])
+            
+            # Show shortened base64 for images
+            img_preview = ""
+            if img_count > 0:
+                first_img = next((img for img in att.images if img and not img.endswith('_placeholder')), "")
+                if first_img:
+                    if first_img.startswith('data:image/'):
+                        img_preview = f", img: {first_img[:30]}...{first_img[-10:]}"
+                    else:
+                        img_preview = f", img: {first_img[:20]}...{first_img[-10:]}"
+            
+            file_info.append(f"{ext}({text_len}chars, {img_count}imgs{img_preview})")
         
-        type_summary = ', '.join(set(file_types)) if file_types else 'mixed'
-        return f"Attachments({len(self.attachments)} files: {type_summary}, {len(self.images)} images)"
+        return f"Attachments([{', '.join(file_info)}])"
     
     def __getattr__(self, name: str):
         """Automatically expose all adapters as methods on Attachments objects."""

@@ -170,11 +170,11 @@ A **consistent vocabulary** for file-to-LLM operations:
 | Stage | Purpose | Examples |
 |-------|---------|----------|
 | **Load** | File format → objects | `pdf_to_pdfplumber`, `csv_to_pandas`, `image_to_pil`, `html_to_bs4` |
-| **Modify** | Transform objects | `pages`, `limit`, `crop`, `rotate` |
+| **Modify** | Transform objects so objects → objects | `pages`, `limit`, `crop`, `rotate` |
 | **Split** | Objects → collections | `paragraphs`, `tokens`, `pages`, `rows`, `sections` |
-| **Present** | Extract for LLMs | `text`, `images`, `markdown`, `metadata` |  
-| **Refine** | Post-process content | `truncate`, `add_headers`, `tile_images` |
-| **Adapt** | Format for APIs | `claude`, `openai_chat`, `openai_response` |
+| **Present** | Extract for LLMs, objects → text, images, audio | `text`, `images`, `markdown`, `xml`, `html` |  
+| **Refine** | Post-process content text, images, audio → text, images, audio| `truncate`, `add_headers`, `tile_images` |
+| **Adapt** | Format for APIs, Attachment(s) → claude, openai_chat, openai_response | `claude`, `openai_chat`, `openai_response` |
 
 ### **Operators: `|` (Sequential) and `+` (Additive)**
 

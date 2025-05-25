@@ -207,3 +207,143 @@ def resize(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
         })
     
     return att
+
+@modifier
+def watermark(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
+    """Add watermark to image: [watermark:text] or [watermark:text|position|style]
+    
+    DSL Commands:
+    - [watermark:My Text] - Simple text watermark (bottom-right)
+    - [watermark:My Text|bottom-left] - Custom position
+    - [watermark:My Text|center|large] - Custom position and style
+    - [watermark:auto] - Auto watermark with filename
+    
+    Positions: bottom-right, bottom-left, top-right, top-left, center
+    Styles: small, medium, large (affects font size and background)
+    """
+    if 'watermark' not in att.commands:
+        return att
+    
+    try:
+        from PIL import ImageDraw, ImageFont
+        import os
+        
+        # Parse watermark command
+        watermark_spec = att.commands['watermark']
+        parts = watermark_spec.split('|')
+        
+        # Extract parameters
+        text = parts[0].strip()
+        position = parts[1].strip() if len(parts) > 1 else 'bottom-right'
+        style = parts[2].strip() if len(parts) > 2 else 'medium'
+        
+        # Handle auto watermark
+        if text.lower() == 'auto':
+            if att.path:
+                filename = os.path.basename(att.path)
+                if len(filename) > 25:
+                    filename = filename[:22] + "..."
+                text = f"📄 {filename}"
+            else:
+                text = "📄 Image"
+        
+        # Create a copy of the image to modify
+        watermarked_img = img.copy()
+        draw = ImageDraw.Draw(watermarked_img)
+        
+        # Configure font based on style
+        img_width, img_height = watermarked_img.size
+        
+        if style == 'small':
+            font_size = max(8, min(img_width, img_height) // 80)
+            bg_padding = 1
+        elif style == 'large':
+            font_size = max(16, min(img_width, img_height) // 30)
+            bg_padding = 4
+        else:  # medium (default)
+            font_size = max(12, min(img_width, img_height) // 50)
+            bg_padding = 2
+        
+        # Try to load font
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        except:
+            try:
+                font = ImageFont.load_default()
+            except:
+                # If no font available, skip watermarking
+                return att
+        
+        # Get text dimensions
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        
+        # Calculate position
+        margin = max(5, font_size // 2)
+        
+        if position == 'bottom-right':
+            text_x = img_width - text_width - margin
+            text_y = img_height - text_height - margin
+        elif position == 'bottom-left':
+            text_x = margin
+            text_y = img_height - text_height - margin
+        elif position == 'top-right':
+            text_x = img_width - text_width - margin
+            text_y = margin
+        elif position == 'top-left':
+            text_x = margin
+            text_y = margin
+        elif position == 'center':
+            text_x = (img_width - text_width) // 2
+            text_y = (img_height - text_height) // 2
+        else:
+            # Default to bottom-right for unknown positions
+            text_x = img_width - text_width - margin
+            text_y = img_height - text_height - margin
+        
+        # Ensure text stays within image bounds
+        text_x = max(0, min(text_x, img_width - text_width))
+        text_y = max(0, min(text_y, img_height - text_height))
+        
+        # Draw background rectangle
+        bg_coords = [
+            text_x - bg_padding,
+            text_y - bg_padding,
+            text_x + text_width + bg_padding,
+            text_y + text_height + bg_padding
+        ]
+        
+        # Choose background color based on style
+        if style == 'large':
+            bg_color = (0, 0, 0, 180)  # More transparent for large text
+            text_color = (255, 255, 255)
+        else:
+            bg_color = (0, 0, 0)  # Solid black for smaller text
+            text_color = (255, 255, 255)
+        
+        # Draw background and text
+        draw.rectangle(bg_coords, fill=bg_color)
+        draw.text((text_x, text_y), text, fill=text_color, font=font)
+        
+        # Update the attachment with watermarked image
+        att._obj = watermarked_img
+        
+        # Add metadata about watermarking
+        att.metadata.setdefault('processing', []).append({
+            'operation': 'watermark',
+            'text': text,
+            'position': position,
+            'style': style,
+            'font_size': font_size
+        })
+        
+        return att
+        
+    except Exception as e:
+        # If watermarking fails, return original attachment
+        att.metadata.setdefault('processing_errors', []).append({
+            'operation': 'watermark',
+            'error': str(e)
+        })
+        return att

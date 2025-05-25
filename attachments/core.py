@@ -254,7 +254,26 @@ class Attachment:
             raise TypeError(f"Cannot add {type(other)} to Attachment")
     
     def __repr__(self) -> str:
-        return f"Attachment(path='{self.path}', text={len(self.text)} chars, images={len(self.images)}, pipeline={self.pipeline})"
+        # Show shortened base64 for images
+        img_info = ""
+        if self.images:
+            img_count = len([img for img in self.images if img and not img.endswith('_placeholder')])
+            if img_count > 0:
+                first_img = next((img for img in self.images if img and not img.endswith('_placeholder')), "")
+                if first_img:
+                    if first_img.startswith('data:image/'):
+                        img_preview = f"{first_img[:30]}...{first_img[-10:]}"
+                    else:
+                        img_preview = f"{first_img[:20]}...{first_img[-10:]}"
+                    img_info = f", images=[{img_count} imgs: {img_preview}]"
+                else:
+                    img_info = f", images={img_count}"
+        
+        return f"Attachment(path='{self.path}', text={len(self.text)} chars{img_info}, pipeline={self.pipeline})"
+    
+    def __str__(self) -> str:
+        """Return the text content for f-string formatting."""
+        return self.text if self.text else f"[No text content from {self.path}]"
 
 
 # --- REGISTRATION SYSTEM ---
