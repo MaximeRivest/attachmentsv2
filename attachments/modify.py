@@ -220,12 +220,15 @@ def watermark(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
     
     Positions: bottom-right, bottom-left, top-right, top-left, center
     Styles: small, medium, large (affects font size and background)
+    
+    By default, applies auto watermark if no watermark command is specified.
     """
+    # Apply default auto watermark if no command specified
     if 'watermark' not in att.commands:
-        return att
+        att.commands['watermark'] = 'auto'
     
     try:
-        from PIL import ImageDraw, ImageFont
+        from PIL import ImageDraw, ImageFont, Image
         import os
         
         # Parse watermark command
@@ -314,17 +317,26 @@ def watermark(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
             text_y + text_height + bg_padding
         ]
         
-        # Choose background color based on style
-        if style == 'large':
-            bg_color = (0, 0, 0, 180)  # More transparent for large text
-            text_color = (255, 255, 255)
-        else:
-            bg_color = (0, 0, 0)  # Solid black for smaller text
-            text_color = (255, 255, 255)
+        # Create a semi-transparent overlay for the background
+        overlay = Image.new('RGBA', watermarked_img.size, (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
         
-        # Draw background and text
-        draw.rectangle(bg_coords, fill=bg_color)
-        draw.text((text_x, text_y), text, fill=text_color, font=font)
+        # Choose background transparency based on style
+        if style == 'large':
+            bg_alpha = 160  # More transparent for large text
+        else:
+            bg_alpha = 180  # Semi-transparent for smaller text
+        
+        overlay_draw.rectangle(bg_coords, fill=(0, 0, 0, bg_alpha))
+        
+        # Composite the overlay onto the main image
+        watermarked_img = Image.alpha_composite(watermarked_img.convert('RGBA'), overlay).convert('RGB')
+        
+        # Redraw on the composited image
+        draw = ImageDraw.Draw(watermarked_img)
+        
+        # Draw the text in white
+        draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
         
         # Update the attachment with watermarked image
         att._obj = watermarked_img

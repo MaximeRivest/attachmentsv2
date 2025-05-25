@@ -204,7 +204,7 @@ def tile_images(input_obj: Union['AttachmentCollection', Attachment]) -> Attachm
                         
                         # Try to use a small font, fallback to default if not available
                         try:
-                            font_size = max(10, min_height // 50)  # Scale font with image size
+                            font_size = max(20, min_height // 25)  # Much larger: increased minimum to 20, better ratio
                             font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
                         except:
                             try:
@@ -222,19 +222,29 @@ def tile_images(input_obj: Union['AttachmentCollection', Attachment]) -> Attachm
                             text_height = bbox[3] - bbox[1]
                             
                             # Position in bottom-right corner with small margin
-                            margin = 5
+                            margin = max(8, font_size // 3)  # Increased margin for better spacing
                             text_x = x + min_width - text_width - margin
                             text_y = y + min_height - text_height - margin
                             
                             # Draw solid background for better readability
-                            bg_padding = 2
+                            bg_padding = max(4, font_size // 4)  # Larger padding for bigger font
                             bg_coords = [
                                 text_x - bg_padding, 
                                 text_y - bg_padding,
                                 text_x + text_width + bg_padding,
                                 text_y + text_height + bg_padding
                             ]
-                            draw.rectangle(bg_coords, fill=(0, 0, 0))  # Solid black background
+                            
+                            # Create a semi-transparent overlay for the background
+                            overlay = Image.new('RGBA', tiled_img.size, (0, 0, 0, 0))
+                            overlay_draw = ImageDraw.Draw(overlay)
+                            overlay_draw.rectangle(bg_coords, fill=(0, 0, 0, 180))  # Semi-transparent black
+                            
+                            # Composite the overlay onto the main image
+                            tiled_img = Image.alpha_composite(tiled_img.convert('RGBA'), overlay).convert('RGB')
+                            
+                            # Redraw on the composited image
+                            draw = ImageDraw.Draw(tiled_img)
                             
                             # Draw the text in white
                             draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
@@ -292,7 +302,7 @@ def resize_images(att: Attachment) -> Attachment:
         import base64
 
         # Get resize specification from DSL commands
-        resize_spec = att.commands.get('resize_images', '800x600')
+        resize_spec = att.commands.get('resize_images', '800')
 
         resized_images_b64 = []
         for img_b64 in getattr(att, "images", []):

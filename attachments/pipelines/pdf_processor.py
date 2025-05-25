@@ -22,14 +22,12 @@ Usage:
     claude_message_format = result.claude()
 """
 
-from ..core import Attachment, presenter
+from ..core import Attachment
+from ..matchers import pdf_match
 from . import processor
-import base64
-import io
-from typing import Optional, List
 
 @processor(
-    match=lambda att: att.path.lower().endswith('.pdf'),
+    match=pdf_match,
     description="Primary PDF processor with format and focus options"
 )
 def pdf_to_llm(att: Attachment) -> Attachment:
