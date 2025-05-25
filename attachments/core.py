@@ -296,26 +296,155 @@ def modifier(func):
     return func
 
 
-def presenter(func):
-    """Register a presenter function with type dispatch."""
-    import inspect
-    sig = inspect.signature(func)
-    params = list(sig.parameters.values())
+def presenter(func=None, *, category=None):
+    """Register a presenter function with type dispatch and smart DSL filtering.
     
-    if len(params) >= 2:
-        type_hint = params[1].annotation
-        if type_hint != inspect.Parameter.empty:
-            key = func.__name__
-            if key not in _presenters:
-                _presenters[key] = []
-            _presenters[key].append((type_hint, func))
-            return func
+    Args:
+        func: The presenter function to register
+        category: Optional explicit category ('text', 'image', 'both', or None for auto-detection)
+        
+    Examples:
+        @presenter
+        def auto_detected(att, data): ...  # Auto-detects based on what it modifies
+        
+        @presenter(category='text')
+        def explicit_text(att, data): ...  # Explicitly categorized as text
+        
+        @presenter(category='image') 
+        def explicit_image(att, data): ...  # Explicitly categorized as image
+        
+        @presenter(category='both')
+        def mixed_content(att, data): ...  # Always runs regardless of focus
+    """
+    def decorator(func):
+        import inspect
+        sig = inspect.signature(func)
+        params = list(sig.parameters.values())
+        
+        # Create a smart wrapper that handles DSL command filtering
+        @wraps(func)
+        def smart_presenter_wrapper(att: Attachment, *args, **kwargs):
+            """Smart presenter wrapper that filters based on DSL commands."""
+            
+            # Get presenter name and category
+            presenter_name = func.__name__
+            presenter_category = category
+            
+            # Auto-detect category if not explicitly provided
+            if presenter_category is None:
+                presenter_category = _detect_presenter_category(func, presenter_name)
+            
+            # Check format and focus preferences from DSL commands
+            format_type = att.commands.get('format', 'markdown')  # Default to markdown
+            focus_type = att.commands.get('focus', 'both')        # Default to both
+            
+            # Apply format filtering (only for text presenters)
+            if presenter_category in ('text', 'both'):
+                if format_type == 'text' and presenter_name == 'markdown':
+                    # Skip markdown presenter if text format is requested
+                    return att
+                elif format_type == 'markdown' and presenter_name == 'text':
+                    # Skip text presenter if markdown format is requested  
+                    return att
+                elif format_type == 'structured' and presenter_name in {'text'}:
+                    # For structured format, prefer markdown over plain text
+                    return att
+            
+            # Apply focus filtering
+            if focus_type == 'text' and presenter_category == 'image':
+                # Skip image presenters if focus is text-only
+                return att
+            elif focus_type == 'images' and presenter_category == 'text':
+                # Skip text presenters if focus is images-only
+                return att
+            # focus_type == 'both' or presenter_category == 'both' allows all presenters to run
+            
+            # If we get here, the presenter should run
+            return func(att, *args, **kwargs)
+        
+        # Register the smart wrapper instead of the original function
+        if len(params) >= 2:
+            type_hint = params[1].annotation
+            if type_hint != inspect.Parameter.empty:
+                key = func.__name__
+                if key not in _presenters:
+                    _presenters[key] = []
+                _presenters[key].append((type_hint, smart_presenter_wrapper))
+                return smart_presenter_wrapper
+        
+        key = func.__name__
+        if key not in _presenters:
+            _presenters[key] = []
+        _presenters[key].append((None, smart_presenter_wrapper))
+        return smart_presenter_wrapper
     
-    key = func.__name__
-    if key not in _presenters:
-        _presenters[key] = []
-    _presenters[key].append((None, func))
-    return func
+    # Handle both @presenter and @presenter(category='text') syntax
+    if func is None:
+        # Called with parameters: @presenter(category='text')
+        return decorator
+    else:
+        # Called without parameters: @presenter
+        return decorator(func)
+
+
+def _detect_presenter_category(func: Callable, presenter_name: str) -> str:
+    """Automatically detect presenter category based on function behavior and name.
+    
+    Returns:
+        'text': Presenter that primarily works with text content
+        'image': Presenter that primarily works with images  
+        'both': Presenter that works with both or should always run
+    """
+    
+    # Known text presenters (legacy hardcoded list for backward compatibility)
+    known_text_presenters = {
+        'text', 'markdown', 'csv', 'xml', 'html', 'head', 'summary', 'metadata'
+    }
+    
+    # Known image presenters (legacy hardcoded list for backward compatibility)  
+    known_image_presenters = {
+        'images', 'thumbnails', 'contact_sheet'
+    }
+    
+    # Check legacy lists first for backward compatibility
+    if presenter_name in known_text_presenters:
+        return 'text'
+    elif presenter_name in known_image_presenters:
+        return 'image'
+    
+    # Auto-detect based on function name patterns
+    text_patterns = ['text', 'markdown', 'csv', 'xml', 'html', 'json', 'yaml', 'summary', 'head', 'metadata']
+    image_patterns = ['image', 'thumbnail', 'chart', 'graph', 'plot', 'visual', 'photo', 'picture']
+    
+    name_lower = presenter_name.lower()
+    
+    # Check for text patterns
+    if any(pattern in name_lower for pattern in text_patterns):
+        return 'text'
+    
+    # Check for image patterns  
+    if any(pattern in name_lower for pattern in image_patterns):
+        return 'image'
+    
+    # Try to analyze the function source code for hints (best effort)
+    try:
+        import inspect
+        source = inspect.getsource(func)
+        
+        # Count references to text vs image operations
+        text_indicators = source.count('att.text') + source.count('.text ') + source.count('text =')
+        image_indicators = source.count('att.images') + source.count('.images') + source.count('images.append')
+        
+        if text_indicators > image_indicators:
+            return 'text'
+        elif image_indicators > text_indicators:
+            return 'image'
+    except:
+        # If source analysis fails, fall back to safe default
+        pass
+    
+    # Default to 'both' for unknown presenters (safe default - always runs)
+    return 'both'
 
 
 def adapter(func):

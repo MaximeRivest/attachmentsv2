@@ -11,6 +11,13 @@ from . import refine as _refine_module
 from . import split as _split_module
 from . import matchers as _matchers_module
 
+# Import processor system and register processors
+from .pipelines import processor, processors, find_primary_processor, find_named_processor, list_available_processors
+
+# Import processors to register them automatically
+from .pipelines import pdf_processor as _pdf_processor_module
+from .pipelines import example_processors as _example_processors_module
+
 # Import data module for sample data access
 from . import data
 
@@ -25,4 +32,4 @@ split = SmartVerbNamespace(_modifiers)  # Split functions are also modifiers
 __all__ = ["Attachment", "AttachmentCollection", "attach", "A", "Pipeline",
            "load", "modify", "present", "adapt", "refine", "split", "data",
            "loader", "modifier", "presenter", "adapter", "refiner",
-           "Attachments", "process"]
+           "processor", "processors", "Attachments", "process"]

@@ -66,7 +66,24 @@ class Attachments:
                 self.attachments.append(error_att)
     
     def _auto_process(self, att: Attachment) -> Union[Attachment, AttachmentCollection]:
-        """Universal pipeline that handles any file type automatically."""
+        """Enhanced auto-processing with processor discovery."""
+        
+        # 1. Try specialized processors first
+        from .pipelines import find_primary_processor
+        processor_fn = find_primary_processor(att)
+        
+        if processor_fn:
+            try:
+                return processor_fn(att)
+            except Exception as e:
+                # If processor fails, fall back to universal pipeline
+                print(f"Processor failed for {att.path}: {e}, falling back to universal pipeline")
+        
+        # 2. Fallback to universal pipeline
+        return self._universal_pipeline(att)
+    
+    def _universal_pipeline(self, att: Attachment) -> Union[Attachment, AttachmentCollection]:
+        """Universal fallback pipeline for files without specialized processors."""
         
         # Get the proper namespaces
         load, present, refine, split = _get_cached_namespaces()
@@ -109,7 +126,7 @@ class Attachments:
             
             # Apply truncation only if text is very long (>5000 chars)
             if hasattr(processed, 'text') and processed.text and len(processed.text) > 5000:
-                processed = processed | refine.truncate_text(3000)
+                processed = processed | refine.truncate(3000)
             
             return processed
     

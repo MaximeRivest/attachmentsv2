@@ -78,6 +78,31 @@ ctx = Attachments(
 )
 ```
 
+### **Smart Content Filtering**
+Control what content gets extracted with `format` and `focus` commands:
+
+```python
+# Format control - choose output style
+ctx = Attachments("report.pdf[format:text]")      # Plain text only
+ctx = Attachments("report.pdf[format:markdown]")  # Markdown formatting (default)
+ctx = Attachments("report.pdf[format:structured]") # Structured data
+
+# Focus control - choose content types  
+ctx = Attachments("report.pdf[focus:text]")       # Text content only
+ctx = Attachments("report.pdf[focus:images]")     # Images only
+ctx = Attachments("report.pdf[focus:both]")       # Both text and images (default)
+
+# Combine for precise control
+ctx = Attachments("report.pdf[format:text][focus:text]")  # Plain text, no images
+```
+
+**How it works**: The `@presenter` decorator automatically filters presenters based on these commands:
+- `format:text` → skips markdown presenters, uses text presenters
+- `format:markdown` → skips text presenters, uses markdown presenters  
+- `focus:text` → skips image presenters (`images`, `thumbnails`)
+- `focus:images` → skips text presenters (`text`, `markdown`, `summary`)
+- `focus:both` → allows all presenters (default behavior)
+
 ### **Direct API Integration**
 ```python
 # Ready for any LLM API
@@ -112,7 +137,7 @@ result = (attach("document.pdf[pages:1-5]")
          | load.pdf_to_pdfplumber 
          | modify.pages 
          | present.markdown + present.images
-         | refine.add_headers | refine.truncate_text
+         | refine.add_headers | refine.truncate
          | adapt.claude("Analyze this content"))
 
 # NEW: Chunking for large documents
@@ -126,7 +151,7 @@ chunks = (attach("large_doc.txt")
 for chunk in chunks:
     claude_message_format = chunk.claude("Summarize this section")
 
-    
+
 ```
 
 ---
@@ -143,14 +168,14 @@ A **consistent vocabulary** for file-to-LLM operations:
 | **Modify** | Transform objects | `pages`, `limit`, `crop`, `rotate` |
 | **Split** | Objects → collections | `paragraphs`, `tokens`, `pages`, `rows`, `sections` |
 | **Present** | Extract for LLMs | `text`, `images`, `markdown`, `metadata` |  
-| **Refine** | Post-process content | `truncate_text`, `add_headers`, `tile_images` |
+| **Refine** | Post-process content | `truncate`, `add_headers`, `tile_images` |
 | **Adapt** | Format for APIs | `claude`, `openai_chat`, `openai_response` |
 
 ### **Operators: `|` (Sequential) and `+` (Additive)**
 
 ```python
 # Sequential pipeline (each step transforms)
-load.pdf_to_pdfplumber | split.pages | present.text | refine.truncate_text
+load.pdf_to_pdfplumber | split.pages | present.text | refine.truncate
 
 # Additive composition (accumulate content)  
 present.text + present.images + present.metadata
@@ -299,7 +324,7 @@ result = (attach("long_doc.txt[tokens:500]")
 - **📊 Analysis**: `head`, `summary`, `metadata`, `thumbnails`
 
 ### **Built-in Refiners**
-- **📝 Text**: `truncate_text`, `add_headers`, `format_tables`
+- **📝 Text**: `truncate`, `add_headers`, `format_tables`
 - **🖼️ Images**: `tile_images`, `resize_images`
 
 ### **Built-in Adapters**
@@ -364,7 +389,7 @@ universal("diagram.png")     # Image description
 result = (attach("https://example.com/article") 
          | load.url_to_bs4 
          | present.text + present.metadata
-         | refine.truncate_text | refine.add_headers
+         | refine.truncate | refine.add_headers
          | adapt.claude("Summarize this article"))
 ```
 
@@ -435,6 +460,73 @@ def custom_format(att: Attachment, data: MyDataType) -> Attachment:
     return att
 ```
 
+### **Smart DSL Filtering**
+The `@presenter` decorator automatically handles DSL command filtering, so your custom presenters get smart filtering for free:
+
+```python
+# Automatic category detection (recommended)
+@presenter
+def json_format(att: Attachment, data: dict) -> Attachment:
+    """Auto-detected as 'text' presenter based on name pattern"""
+    import json
+    att.text += json.dumps(data, indent=2)
+    return att
+
+@presenter  
+def chart_visualization(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
+    """Auto-detected as 'image' presenter based on name pattern"""
+    chart_base64 = create_chart(df)
+    att.images.append(chart_base64)
+    return att
+
+# Explicit categorization (when auto-detection isn't sufficient)
+@presenter(category='text')
+def custom_text_format(att: Attachment, data: dict) -> Attachment:
+    """Explicitly categorized as text presenter"""
+    att.text += format_custom_text(data)
+    return att
+
+@presenter(category='image')
+def custom_visualization(att: Attachment, data: dict) -> Attachment:
+    """Explicitly categorized as image presenter"""
+    att.images.append(generate_custom_viz(data))
+    return att
+
+@presenter(category='both')
+def always_run_presenter(att: Attachment, data: dict) -> Attachment:
+    """Always runs regardless of focus setting"""
+    att.text += "This always runs\n"
+    return att
+
+# Usage with automatic filtering
+result = attach("data.csv[format:text][focus:text]") | load.csv_to_pandas | (
+    present.json_format +           # ✅ Runs (auto-detected as text)
+    present.chart_visualization +   # ❌ Skipped (auto-detected as image)
+    present.custom_text_format +    # ✅ Runs (explicit text)
+    present.custom_visualization +  # ❌ Skipped (explicit image)
+    present.always_run_presenter    # ✅ Runs (explicit 'both')
+)
+```
+
+**Automatic Detection** (zero configuration):
+- **Name patterns**: `json`, `text`, `markdown`, `csv`, `xml`, `html`, `summary` → text
+- **Name patterns**: `image`, `chart`, `graph`, `plot`, `visual`, `thumbnail` → image
+- **Source analysis**: Analyzes function code for `att.text` vs `att.images` usage
+- **Safe default**: Unknown presenters default to `'both'` (always run)
+
+**Explicit Categories**:
+- `@presenter(category='text')` → Only runs when focus allows text
+- `@presenter(category='image')` → Only runs when focus allows images  
+- `@presenter(category='both')` → Always runs regardless of focus
+- `@presenter` → Auto-detects category (recommended)
+
+**Benefits for Contributors**:
+- ✅ **Zero configuration**: Most presenters work automatically
+- ✅ **Intuitive naming**: Use descriptive names and get automatic categorization
+- ✅ **Explicit control**: Override auto-detection when needed
+- ✅ **Backward compatible**: Existing presenters continue to work
+- ✅ **No core changes**: Add new presenter types without modifying core code
+
 ### **Custom Refiners**
 ```python
 from attachments import refiner
@@ -446,6 +538,59 @@ def custom_enhancement(att: Attachment) -> Attachment:
         att.text = enhance_text(att.text)
     return att
 ```
+
+### **Add New File Format Support**
+1. Create a loader function with `@loader` decorator
+2. Add corresponding matcher in `matchers.py`
+3. Submit PR with tests
+
+### **Add New Presenters** (Super Easy!)
+Adding new presenters is now completely automatic:
+
+```python
+# Just use descriptive names - automatic categorization!
+@presenter
+def yaml_format(att: Attachment, data: dict) -> Attachment:
+    """Auto-detected as 'text' presenter"""
+    import yaml
+    att.text += yaml.dump(data)
+    return att
+
+@presenter
+def heatmap_chart(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
+    """Auto-detected as 'image' presenter"""
+    chart_data = generate_heatmap(df)
+    att.images.append(chart_data)
+    return att
+
+# Override auto-detection if needed
+@presenter(category='both')
+def special_presenter(att: Attachment, data) -> Attachment:
+    """Always runs regardless of focus"""
+    att.text += "Special content\n"
+    return att
+```
+
+**That's it!** Your presenters automatically:
+- ✅ Work with DSL filtering (`[focus:text]`, `[focus:images]`)
+- ✅ Integrate with additive pipelines (`present.a + present.b`)
+- ✅ Support type dispatch for different data types
+- ✅ Get proper categorization based on naming
+
+### **Add New Transformations**
+1. Create modifier/presenter/refiner with appropriate decorator
+2. Add DSL command support if applicable
+3. Include documentation and examples
+
+### **Improve Documentation**
+- Add examples for your use case
+- Improve existing docstrings
+- Create tutorials for complex workflows
+
+### **Report Issues**
+- Bug reports with minimal reproduction cases
+- Feature requests with clear use cases
+- Performance issues with profiling data
 
 ---
 
@@ -459,6 +604,7 @@ def custom_enhancement(att: Attachment) -> Attachment:
 - **🧩 Composable pipelines**: Natural chaining and combination
 - **🎛️ DSL integration**: Commands embedded in file paths
 - **🎯 Type dispatch**: Automatic routing based on content types
+- **🧠 Smart filtering**: Presenters automatically respect DSL commands
 - **🤖 AI-ready**: Direct integration with modern LLM APIs
 
 ### **Two-Level Architecture**
@@ -519,6 +665,39 @@ We welcome contributions! Here's how to help:
 1. Create a loader function with `@loader` decorator
 2. Add corresponding matcher in `matchers.py`
 3. Submit PR with tests
+
+### **Add New Presenters** (Super Easy!)
+Adding new presenters is now completely automatic:
+
+```python
+# Just use descriptive names - automatic categorization!
+@presenter
+def yaml_format(att: Attachment, data: dict) -> Attachment:
+    """Auto-detected as 'text' presenter"""
+    import yaml
+    att.text += yaml.dump(data)
+    return att
+
+@presenter
+def heatmap_chart(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
+    """Auto-detected as 'image' presenter"""
+    chart_data = generate_heatmap(df)
+    att.images.append(chart_data)
+    return att
+
+# Override auto-detection if needed
+@presenter(category='both')
+def special_presenter(att: Attachment, data) -> Attachment:
+    """Always runs regardless of focus"""
+    att.text += "Special content\n"
+    return att
+```
+
+**That's it!** Your presenters automatically:
+- ✅ Work with DSL filtering (`[focus:text]`, `[focus:images]`)
+- ✅ Integrate with additive pipelines (`present.a + present.b`)
+- ✅ Support type dispatch for different data types
+- ✅ Get proper categorization based on naming
 
 ### **Add New Transformations**
 1. Create modifier/presenter/refiner with appropriate decorator
@@ -633,7 +812,7 @@ process(*paths: str) -> Attachments         # Convenience function
 load.pdf_to_pdfplumber                      # Load PDF
 modify.pages                                # Extract pages
 present.text + present.images               # Extract content
-refine.truncate_text | refine.add_headers   # Process content
+refine.truncate | refine.add_headers   # Process content
 adapt.claude("prompt")                      # Format for API
 ```
 

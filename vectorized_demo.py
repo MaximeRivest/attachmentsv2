@@ -163,7 +163,7 @@ def demo_custom_operations():
     print(f"Manual collection: {collection}")
     
     # Vectorized text processing
-    result = collection | refine.truncate_text | refine.add_headers
+    result = collection | refine.truncate | refine.add_headers
     print("After vectorized refinement:")
     for i, att in enumerate(result.attachments):
         print(f"  Doc {i+1}: {att.text[:50]}...")

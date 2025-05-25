@@ -7,6 +7,13 @@ from .core import Attachment, modifier
 # --- MODIFIERS ---
 
 @modifier
+def pages(att: Attachment) -> Attachment:
+    """Fallback pages modifier - stores page commands for later processing."""
+    # This fallback handles the case when object isn't loaded yet
+    # The actual page selection will happen in the type-specific modifiers
+    return att
+
+@modifier
 def pages(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
     """Extract specific pages from PDF."""
     if 'pages' not in att.commands:

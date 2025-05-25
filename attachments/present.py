@@ -362,5 +362,5 @@ def images(att: Attachment) -> Attachment:
     return att
 
 
-# Note: truncate function moved to refine.py as refine.truncate_text
+# Note: truncate function moved to refine.py as refine.truncate
 # This maintains clean separation: present extracts, refine processes

@@ -3,7 +3,7 @@ from .core import Attachment, refiner
 # --- REFINERS ---
 
 @refiner
-def truncate_text(att: Attachment, limit: int = None) -> Attachment:
+def truncate(att: Attachment, limit: int = None) -> Attachment:
     """Truncate text content to specified character limit."""
     # Get limit from DSL commands or parameter
     if limit is None:
