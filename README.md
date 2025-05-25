@@ -335,6 +335,7 @@ result = (attach("long_doc.txt[tokens:500]")
 ### **Built-in Adapters**
 - **🤖 Claude**: Anthropic format with image support
 - **🤖 OpenAI**: Chat completion format
+- **🤖 DSPy**: BaseType-compatible objects for DSPy signatures
 - **🎛️ Prompt support**: Via DSL `[prompt:text]` or parameters
 
 ---
@@ -427,6 +428,255 @@ result = (attach("sales_data.csv[limit:1000]")
 ```
 
 ---
+
+## 🧠 **DSPy Integration**
+
+**Seamless integration with DSPy** for building sophisticated LLM programs:
+
+### **DSPy Adapter**
+Convert any attachment to DSPy BaseType-compatible objects:
+
+```python
+from attachments import attach, load, present, adapt
+import dspy
+
+# Configure DSPy
+dspy.configure(lm=dspy.LM('openai/gpt-4.1-nano'))
+
+# Process document and convert to DSPy format
+document = (attach("report.pdf") 
+           | load.pdf_to_pdfplumber 
+           | present.text + present.pdf_images
+           | adapt.dspy)
+
+# Use in DSPy signatures
+rag = dspy.ChainOfThought("question, document -> answer")
+result = rag(question="What are the key findings?", document=document)
+print(result.answer)
+```
+
+Or simply with the Attachments object:
+
+```python
+result = rag(question="What do you see?", 
+             document=Attachments("report.pdf").dspy())
+result.answer
+```
+
+
+### **DSPy Integration Benefits**
+- **🎯 Type Safety**: Proper DSPy BaseType compatibility
+- **🔄 Serialization**: Handles complex multimodal content serialization
+- **🖼️ Image Support**: Seamless base64 image handling for vision models
+- **📝 Text Processing**: Rich text content with proper formatting
+- **🧩 Composability**: Works with all DSPy signatures and programs
+
+---
+
+## 🌟 **Real-World Examples**
+
+### **Custom Web Scraping Pipeline**
+Build custom processors for specific domains:
+
+```python
+from attachments import loader, modifier, presenter, Attachment
+import requests
+from bs4 import BeautifulSoup
+import re
+
+# Custom URL loader with BeautifulSoup
+@loader(lambda att: bool(re.match(r'^https?://', att.path)))
+def url_to_bs4(att: Attachment) -> Attachment:
+    """Load URL content and parse with BeautifulSoup."""
+    response = requests.get(att.path, timeout=10)
+    response.raise_for_status()
+    
+    att._obj = BeautifulSoup(response.content, 'html.parser')
+    att.metadata.update({
+        'content_type': response.headers.get('content-type', ''),
+        'status_code': response.status_code,
+    })
+    return att
+
+# CSS selector modifier
+@modifier
+def select(att: Attachment, soup: BeautifulSoup) -> Attachment:
+    """CSS selector for BeautifulSoup objects."""
+    if 'select' not in att.commands:
+        return att
+    
+    selector = att.commands['select']
+    selected_elements = soup.select(selector)
+    
+    if not selected_elements:
+        new_soup = BeautifulSoup("", 'html.parser')
+    elif len(selected_elements) == 1:
+        new_soup = BeautifulSoup(str(selected_elements[0]), 'html.parser')
+    else:
+        container_html = ''.join(str(elem) for elem in selected_elements)
+        new_soup = BeautifulSoup(f"<div>{container_html}</div>", 'html.parser')
+    
+    att._obj = new_soup
+    att.metadata.update({
+        'selector': selector,
+        'selected_count': len(selected_elements),
+    })
+    return att
+
+# Custom presenters for BeautifulSoup
+@presenter(category='text')
+def text(att: Attachment, soup: BeautifulSoup) -> Attachment:
+    """Extract text from BeautifulSoup object."""
+    att.text = soup.get_text(strip=True)
+    return att
+
+@presenter
+def html(att: Attachment, soup: BeautifulSoup) -> Attachment:
+    """Get formatted HTML from BeautifulSoup object."""
+    att.text = soup.prettify()
+    return att
+
+# Usage examples
+title_extractor = (load.url_to_bs4 | modify.select | present.text)
+result = title_extractor("https://en.wikipedia.org/wiki/Llama[select:title]")
+
+# Function-style usage
+def url_to_title_text(url: str) -> str:
+    return (attach(url) | load.url_to_bs4 | modify.select | present.text)
+
+title = url_to_title_text("https://en.wikipedia.org/wiki/Llama[select:h1]")
+```
+
+### **HEIC Image Processing**
+Complete HEIC image processing pipeline:
+
+```python
+from attachments import loader, modifier, Attachment
+
+@loader(lambda att: att.path.lower().endswith(('.heic', '.heif')))
+def heic_to_pillow(att: Attachment) -> Attachment:
+    """Load HEIC files with pillow-heif support."""
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    from PIL import Image
+    att._obj = Image.open(att.path)
+    return att
+
+@modifier  
+def crop(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
+    """Crop: [crop:x1,y1,x2,y2]"""
+    if 'crop' not in att.commands: 
+        return att
+    coords = [int(x) for x in att.commands['crop'].split(',')]
+    att._obj = img.crop(coords)
+    return att
+
+@modifier
+def rotate(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
+    """Rotate: [rotate:degrees] (positive = clockwise)"""
+    if 'rotate' in att.commands:
+        att._obj = img.rotate(-float(att.commands['rotate']), expand=True)
+    return att
+
+# Multiple usage patterns
+# 1. Direct pipeline usage
+result1 = (attach("IMG_2160.HEIC[crop:100,100,400,300][rotate:90]")
+          | load.heic_to_pillow | modify.crop | modify.rotate 
+          | present.images | adapt.claude("What do you see?"))
+
+# 2. Reusable processor function
+image_processor = (load.heic_to_pillow | modify.crop | modify.rotate | present.images)
+result2 = image_processor("IMG_2160.HEIC[crop:50,50,200,200][rotate:45]").claude("Describe this")
+
+# 3. Universal image processor with fallbacks
+universal_image = (load.heic_to_pillow | load.image_to_pil  # HEIC then fallback
+                  | modify.crop | modify.rotate | present.images)
+
+# Works with any image format
+heic_result = universal_image("IMG_2160.HEIC[rotate:45]").claude("What's in this photo?")
+png_result = universal_image("Figure_1.png").openai_chat("Describe the chart")
+```
+
+### **Pipeline Composition Patterns**
+Advanced composition and chaining techniques:
+
+```python
+# 1. Assign pipelines to variables (creates callable functions)
+csv_processor = (load.csv_to_pandas | modify.limit | present.head 
+                | present.summary | present.metadata)
+
+# Use as function
+result = csv_processor("data.csv[limit:100]")
+analysis = result.claude("What patterns do you see in this data?")
+
+# 2. Additive presentation (accumulate multiple content types)
+rich_csv = (attach("sales_data.csv") | load.csv_to_pandas 
+           | present.head + present.summary + present.metadata)
+
+# 3. Refinement chains (post-process extracted content)
+refined_csv = (attach("large_data.csv") | load.csv_to_pandas 
+              | present.head + present.summary 
+              | refine.truncate | refine.add_headers)
+
+# 4. Complex multi-step pipeline with DSL commands
+complete_pipeline = (attach("data.csv[limit:5][truncate:200][prompt:analyze this data]")
+                    | load.csv_to_pandas | modify.limit           
+                    | present.markdown + present.summary          
+                    | refine.truncate | refine.add_headers   
+                    | adapt.claude)
+
+# 5. Pipeline chaining (combine different processors)
+super_pipeline = (
+    (load.url_to_bs4 | modify.select | present.text) |  # Web processing
+    (load.csv_to_pandas | modify.limit | present.head)   # Data processing
+)
+
+# Works with different file types
+web_result = super_pipeline("https://example.com[select:p]")
+data_result = super_pipeline("data.csv[limit:10]")
+
+# 6. Method-style API (convenient for interactive use)
+csv_to_llm = (load.csv_to_pandas | modify.limit | present.head 
+             | present.metadata | present.summary | present.text)
+
+# All these work:
+result1 = csv_to_llm.claude("data.csv[limit:1]", prompt="What do you see")
+result2 = csv_to_llm.openai_chat("data.csv[limit:1]", prompt="Analyze this")
+result3 = csv_to_llm.openai_response("data.csv[limit:1]", prompt="Summarize")
+```
+
+### **Convenience API Examples**
+Simple high-level API for common use cases:
+
+```python
+from attachments import Attachments
+
+# 1. Single-line document processing
+result = Attachments("report.pdf").claude("Summarize the key findings")
+
+# 2. Multi-file analysis
+docs = Attachments("report1.pdf", "report2.pdf", "data.csv")
+comparison = docs.openai_chat("Compare these documents and highlight differences")
+
+# 3. DSPy integration (one-liner)
+import dspy
+dspy.configure(lm=dspy.LM('anthropic/claude-3-5-haiku-latest'))
+
+rag = dspy.ChainOfThought("question, document -> answer")
+result = rag(
+    question="What are the main insights?", 
+    document=Attachments("quarterly_report.pdf").dspy()
+)
+
+# 4. Multimodal processing with DSL
+visual_analysis = Attachments("presentation.pdf[focus:both][resize:1200x800]")
+insights = visual_analysis.claude("Analyze both the text and visual elements")
+
+# 5. Batch processing pattern
+for att in Attachments("doc1.pdf", "doc2.pdf", "chart.png", "data.csv"):
+    result = att.claude(f"Analyze this document")
+    print(f"{att.path}: {result}")
+```
 
 ## 🧩 **Extending Attachments**
 
@@ -851,6 +1101,12 @@ Built with ❤️ by the AI community. Special thanks to:
 ---
 
 **Ready to stop re-writing file processing code?** 
+
+```bash
+pip install attachments
+```
+
+**Join the community building the future of AI file processing!** 🚀
 
 ```bash
 pip install attachments

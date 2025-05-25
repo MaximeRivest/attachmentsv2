@@ -129,25 +129,105 @@ def tile_images(collection: 'AttachmentCollection') -> Attachment:
 
 @refiner
 def resize_images(att: Attachment) -> Attachment:
-    """Resize images based on DSL commands."""
+    """Resize images (in base64) based on DSL commands and return as base64.
+    
+    Supports:
+    - Percentage scaling: [resize_images:50%]
+    - Specific dimensions: [resize_images:800x600] 
+    - Proportional width: [resize_images:800]
+    """
     try:
         from PIL import Image
-        
-        if hasattr(att, '_obj') and isinstance(att._obj, Image.Image):
-            resize_config = att.commands.get('resize', '800x600')
-            if 'x' in resize_config:
-                width, height = map(int, resize_config.split('x'))
-                att._obj = att._obj.resize((width, height))
+        import io
+        import base64
+
+        # Get resize specification from DSL commands
+        resize_spec = att.commands.get('resize_images', '800x600')
+
+        resized_images_b64 = []
+        for img_b64 in getattr(att, "images", []):
+            try:
+                # Handle both data URLs and raw base64
+                if img_b64.startswith('data:image/'):
+                    # Extract base64 data from data URL
+                    img_data_b64 = img_b64.split(',', 1)[1]
+                else:
+                    # Raw base64 data
+                    img_data_b64 = img_b64
                 
-                # Update metadata
-                att.metadata.setdefault('processing', []).append({
-                    'operation': 'resize',
-                    'new_size': (width, height)
+                img_data = base64.b64decode(img_data_b64)
+                img = Image.open(io.BytesIO(img_data))
+                img = img.convert("RGB")
+                
+                # Get original dimensions
+                original_width, original_height = img.size
+                
+                # Parse resize specification (same logic as modify.resize)
+                if resize_spec.endswith('%'):
+                    # Percentage scaling: "50%" -> scale to 50% of original size
+                    percentage = float(resize_spec[:-1]) / 100.0
+                    new_width = int(original_width * percentage)
+                    new_height = int(original_height * percentage)
+                elif 'x' in resize_spec:
+                    # Dimension specification: "800x600" -> specific width and height
+                    width_str, height_str = resize_spec.split('x', 1)
+                    new_width = int(width_str)
+                    new_height = int(height_str)
+                else:
+                    # Single dimension: "800" -> scale proportionally to this width
+                    new_width = int(resize_spec)
+                    aspect_ratio = original_height / original_width
+                    new_height = int(new_width * aspect_ratio)
+                
+                # Ensure minimum size of 1x1
+                new_width = max(1, new_width)
+                new_height = max(1, new_height)
+                
+                # Resize the image
+                img_resized = img.resize((new_width, new_height))
+                
+                # Convert back to base64
+                buffer = io.BytesIO()
+                img_resized.save(buffer, format="PNG")
+                buffer.seek(0)
+                img_resized_b64 = base64.b64encode(buffer.read()).decode()
+                
+                # Return in the same format as input (data URL or raw base64)
+                if img_b64.startswith('data:image/'):
+                    resized_images_b64.append(f"data:image/png;base64,{img_resized_b64}")
+                else:
+                    resized_images_b64.append(img_resized_b64)
+                    
+            except (ValueError, ZeroDivisionError) as e:
+                # If one image fails, skip it but log the error
+                att.metadata.setdefault('processing_errors', []).append({
+                    'operation': 'resize_images',
+                    'error': f"Invalid resize specification '{resize_spec}': {str(e)}",
+                    'image_index': len(resized_images_b64)
                 })
-        
+                continue
+            except Exception as e:
+                # If one image fails for other reasons, skip it
+                att.metadata.setdefault('processing_errors', []).append({
+                    'operation': 'resize_images', 
+                    'error': f"Failed to process image: {str(e)}",
+                    'image_index': len(resized_images_b64)
+                })
+                continue
+
+        att.images = resized_images_b64
+
+        # Update metadata with detailed information
+        att.metadata.setdefault('processing', []).append({
+            'operation': 'resize_images',
+            'resize_spec': resize_spec,
+            'images_processed': len(resized_images_b64),
+            'images_failed': len(getattr(att, 'images', [])) - len(resized_images_b64)
+        })
+
         return att
-        
+
     except ImportError:
         raise ImportError("Pillow is required for image resizing. Install with: pip install Pillow")
     except Exception as e:
-        raise ValueError(f"Could not resize image: {e}") 
+        raise ValueError(f"Could not resize images: {e}") 

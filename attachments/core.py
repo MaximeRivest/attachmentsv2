@@ -335,16 +335,16 @@ def presenter(func=None, *, category=None):
                 presenter_category = _detect_presenter_category(func, presenter_name)
             
             # Check format and focus preferences from DSL commands
-            format_type = att.commands.get('format', 'markdown')  # Default to markdown
+            format_type = att.commands.get('format')  # Don't default to markdown
             focus_type = att.commands.get('focus', 'both')        # Default to both
             
-            # Apply format filtering (only for text presenters)
-            if presenter_category in ('text', 'both'):
+            # Apply format filtering (only when format is explicitly specified)
+            if format_type is not None and presenter_category in ('text', 'both'):
                 if format_type == 'text' and presenter_name == 'markdown':
-                    # Skip markdown presenter if text format is requested
+                    # Skip markdown presenter if text format is explicitly requested
                     return att
                 elif format_type == 'markdown' and presenter_name == 'text':
-                    # Skip text presenter if markdown format is requested  
+                    # Skip text presenter if markdown format is explicitly requested  
                     return att
                 elif format_type == 'structured' and presenter_name in {'text'}:
                     # For structured format, prefer markdown over plain text

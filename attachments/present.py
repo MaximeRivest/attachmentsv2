@@ -163,21 +163,109 @@ def images(att: Attachment, pres: 'pptx.Presentation') -> Attachment:
     
     return att
 
-
 @presenter
-def images(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
-    """Extract images from PDF pages (placeholder implementation)."""
-    try:
-        pages_to_process = att.metadata.get('selected_pages', range(1, min(4, len(pdf.pages) + 1)))
-        
-        for page_num in pages_to_process:
-            if 1 <= page_num <= len(pdf.pages):
-                # This is a placeholder - real implementation would extract actual images
-                att.images.append(f"pdf_page_{page_num}_placeholder_base64")
-    except:
-        pass
+def images(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
+    """
+    Convert PDF pages to PNG images using pypdfium2 (MIT-compatible).
     
-    return att
+    Extracts resize parameter from DSL commands: file.pdf[resize:50%]
+    """
+    try:
+        # Try to import pypdfium2
+        import pypdfium2 as pdfium
+    except ImportError:
+        # Fallback: add error message to metadata
+        att.metadata['pdf_images_error'] = "pypdfium2 not installed. Install with: pip install pypdfium2"
+        return att
+    
+    # Get resize parameter from DSL commands
+    resize = att.commands.get('resize')
+    
+    images = []
+    
+    try:
+        # Get the PDF bytes for pypdfium2
+        if hasattr(pdf_reader, 'stream') and pdf_reader.stream:
+            # Save current position
+            original_pos = pdf_reader.stream.tell()
+            # Read the PDF bytes
+            pdf_reader.stream.seek(0)
+            pdf_bytes = pdf_reader.stream.read()
+            # Restore position
+            pdf_reader.stream.seek(original_pos)
+        else:
+            # Try to get bytes from the file path if available
+            if hasattr(pdf_reader, 'stream') and hasattr(pdf_reader.stream, 'name'):
+                with open(pdf_reader.stream.name, 'rb') as f:
+                    pdf_bytes = f.read()
+            elif att.path:
+                # Use the attachment path directly
+                with open(att.path, 'rb') as f:
+                    pdf_bytes = f.read()
+            else:
+                raise Exception("Cannot access PDF bytes for rendering")
+        
+        # Open with pypdfium2
+        pdf_doc = pdfium.PdfDocument(pdf_bytes)
+        num_pages = len(pdf_doc)
+        
+        # Limit to reasonable number of pages (respect pages command if present)
+        if 'pages' in att.commands:
+            # If pages are specified, use those
+            max_pages = min(num_pages, 20)  # Still cap at 20 for safety
+        else:
+            # Default limit
+            max_pages = min(num_pages, 10)
+        
+        for page_idx in range(max_pages):
+            page = pdf_doc[page_idx]
+            
+            # Render at 2x scale for better quality
+            pil_image = page.render(scale=2).to_pil()
+            
+            # Apply resize if specified
+            if resize:
+                if 'x' in resize:
+                    # Format: 800x600
+                    w, h = map(int, resize.split('x'))
+                    pil_image = pil_image.resize((w, h))
+                elif resize.endswith('%'):
+                    # Format: 50%
+                    scale = int(resize[:-1]) / 100
+                    new_width = int(pil_image.width * scale)
+                    new_height = int(pil_image.height * scale)
+                    pil_image = pil_image.resize((new_width, new_height))
+            
+            # Convert to PNG bytes
+            img_byte_arr = io.BytesIO()
+            pil_image.save(img_byte_arr, format='PNG')
+            png_bytes = img_byte_arr.getvalue()
+            
+            # Encode as base64 data URL
+            b64_string = base64.b64encode(png_bytes).decode('utf-8')
+            images.append(f"data:image/png;base64,{b64_string}")
+            
+            # Clean up
+            page.close()
+        
+        pdf_doc.close()
+        
+        # Add images to attachment
+        att.images.extend(images)
+        
+        # Add metadata about image extraction
+        att.metadata.update({
+            'pdf_pages_rendered': len(images),
+            'pdf_total_pages': num_pages,
+            'pdf_resize_applied': resize if resize else None
+        })
+        
+        return att
+        
+    except Exception as e:
+        # Add error info to metadata instead of failing
+        att.metadata['pdf_images_error'] = f"Error rendering PDF: {e}"
+        return att
 
 
 # SUMMARY PRESENTERS

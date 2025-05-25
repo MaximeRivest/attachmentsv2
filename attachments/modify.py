@@ -134,3 +134,76 @@ def select(att: Attachment, soup: 'bs4.BeautifulSoup') -> Attachment:
     
     return att
 
+@modifier  
+def crop(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
+    """Crop: [crop:x1,y1,x2,y2] (box: left, upper, right, lower)"""
+    if 'crop' not in att.commands:
+        return att
+    box = att.commands['crop']
+    # Accept string "x1,y1,x2,y2" or tuple/list
+    if isinstance(box, str):
+        try:
+            box = [int(x) for x in box.split(',')]
+        except Exception:
+            raise ValueError(f"Invalid crop box format: {att.commands['crop']!r}")
+    if not (isinstance(box, (list, tuple)) and len(box) == 4):
+        raise ValueError(f"Crop box must be 4 values (x1,y1,x2,y2), got: {box!r}")
+    x1, y1, x2, y2 = box
+    # Use the box as provided, do not reorder coordinates
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError(f"Invalid crop box: right <= left or lower <= upper ({x1},{y1},{x2},{y2})")
+    att._obj = img.crop((x1, y1, x2, y2))
+    return att
+
+@modifier
+def rotate(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
+    """Rotate: [rotate:degrees] (positive = clockwise)"""
+    if 'rotate' in att.commands:
+        att._obj = img.rotate(-float(att.commands['rotate']), expand=True)
+    return att
+
+@modifier
+def resize(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
+    """Resize: [resize:50%] or [resize:800x600] or [resize:800]"""
+    if 'resize' not in att.commands:
+        return att
+    
+    resize_spec = att.commands['resize']
+    original_width, original_height = img.size
+    
+    try:
+        if resize_spec.endswith('%'):
+            # Percentage scaling: "50%" -> scale to 50% of original size
+            percentage = float(resize_spec[:-1]) / 100.0
+            new_width = int(original_width * percentage)
+            new_height = int(original_height * percentage)
+        elif 'x' in resize_spec:
+            # Dimension specification: "800x600" -> specific width and height
+            width_str, height_str = resize_spec.split('x', 1)
+            new_width = int(width_str)
+            new_height = int(height_str)
+        else:
+            # Single dimension: "800" -> scale proportionally to this width
+            new_width = int(resize_spec)
+            aspect_ratio = original_height / original_width
+            new_height = int(new_width * aspect_ratio)
+        
+        # Ensure minimum size of 1x1
+        new_width = max(1, new_width)
+        new_height = max(1, new_height)
+        
+        att._obj = img.resize((new_width, new_height))
+        att.metadata.update({
+            'resize_applied': True,
+            'original_size': (original_width, original_height),
+            'new_size': (new_width, new_height),
+            'resize_spec': resize_spec
+        })
+        
+    except (ValueError, ZeroDivisionError) as e:
+        # If resize fails, keep original image and log the error
+        att.metadata.update({
+            'resize_error': f"Invalid resize specification '{resize_spec}': {str(e)}"
+        })
+    
+    return att
