@@ -274,6 +274,35 @@ class Attachment:
     def __str__(self) -> str:
         """Return the text content for f-string formatting."""
         return self.text if self.text else f"[No text content from {self.path}]"
+    
+    def cleanup(self):
+        """Clean up any temporary resources associated with this attachment."""
+        # Clean up temporary PDF files
+        if 'temp_pdf_path' in self.metadata:
+            try:
+                import os
+                temp_path = self.metadata['temp_pdf_path']
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                del self.metadata['temp_pdf_path']
+            except Exception:
+                # If cleanup fails, just continue
+                pass
+        
+        # Close any open file objects
+        if hasattr(self._obj, 'close'):
+            try:
+                self._obj.close()
+            except Exception:
+                pass
+    
+    def __del__(self):
+        """Destructor to ensure cleanup when attachment is garbage collected."""
+        try:
+            self.cleanup()
+        except Exception:
+            # Ignore errors during cleanup in destructor
+            pass
 
 
 # --- REGISTRATION SYSTEM ---

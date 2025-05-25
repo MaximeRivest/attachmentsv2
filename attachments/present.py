@@ -195,7 +195,12 @@ def images(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
     
     try:
         # Get the PDF bytes for pypdfium2
-        if hasattr(pdf_reader, 'stream') and pdf_reader.stream:
+        # Check if we have a temporary PDF path (with CropBox already fixed)
+        if 'temp_pdf_path' in att.metadata:
+            # Use the temporary PDF file that already has CropBox defined
+            with open(att.metadata['temp_pdf_path'], 'rb') as f:
+                pdf_bytes = f.read()
+        elif hasattr(pdf_reader, 'stream') and pdf_reader.stream:
             # Save current position
             original_pos = pdf_reader.stream.tell()
             # Read the PDF bytes
@@ -215,7 +220,7 @@ def images(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
             else:
                 raise Exception("Cannot access PDF bytes for rendering")
         
-        # Open with pypdfium2
+        # Open with pypdfium2 (CropBox should already be defined if temp file was used)
         pdf_doc = pdfium.PdfDocument(pdf_bytes)
         num_pages = len(pdf_doc)
         
@@ -254,10 +259,8 @@ def images(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
             # Encode as base64 data URL
             b64_string = base64.b64encode(png_bytes).decode('utf-8')
             images.append(f"data:image/png;base64,{b64_string}")
-            
-            # Clean up
-            page.close()
         
+        # Clean up PDF document
         pdf_doc.close()
         
         # Add images to attachment

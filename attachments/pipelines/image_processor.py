@@ -43,5 +43,5 @@ def image_to_llm(att: Attachment) -> Attachment:
     return (att 
            | load.image_to_pil 
            | modify.watermark  # Now applies auto watermark by default
-           | present.images 
-           | refine.resize_images)  # Only acts if [resize_images:...] present
+           | present.images + present.metadata
+           | refine.resize_images + refine.add_headers)  # Only acts if [resize_images:...] present
