@@ -23,7 +23,12 @@ def markdown(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
     att.text += f"# PDF Document: {att.path}\n\n"
     
     try:
-        pages_to_process = att.metadata.get('selected_pages', range(1, min(6, len(pdf.pages) + 1)))
+        # Process ALL pages by default, or only selected pages if specified
+        if 'selected_pages' in att.metadata:
+            pages_to_process = att.metadata['selected_pages']
+        else:
+            # Process ALL pages by default
+            pages_to_process = range(1, len(pdf.pages) + 1)
         
         for page_num in pages_to_process:
             if 1 <= page_num <= len(pdf.pages):
@@ -97,7 +102,12 @@ def text(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
     att.text += "=" * len(f"PDF Document: {att.path}") + "\n\n"
     
     try:
-        pages_to_process = att.metadata.get('selected_pages', range(1, min(6, len(pdf.pages) + 1)))
+        # Process ALL pages by default, or only selected pages if specified
+        if 'selected_pages' in att.metadata:
+            pages_to_process = att.metadata['selected_pages']
+        else:
+            # Process ALL pages by default
+            pages_to_process = range(1, len(pdf.pages) + 1)
         
         for page_num in pages_to_process:
             if 1 <= page_num <= len(pdf.pages):
