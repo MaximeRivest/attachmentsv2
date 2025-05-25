@@ -17,6 +17,7 @@ from .pipelines import processor, processors, find_primary_processor, find_named
 # Import processors to register them automatically
 from .pipelines import pdf_processor as _pdf_processor_module
 from .pipelines import image_processor as _image_processor_module
+from .pipelines import pptx_processor as _pptx_processor_module
 #from .pipelines import example_processors as _example_processors_module
 
 # Import data module for sample data access

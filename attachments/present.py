@@ -255,25 +255,144 @@ def images(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
 
 @presenter
 def images(att: Attachment, pres: 'pptx.Presentation') -> Attachment:
-    """Extract images from PowerPoint slides."""
+    """Convert PPTX slides to PNG images by converting to PDF first, then rendering."""
     try:
-        slide_indices = att.metadata.get('selected_slides', range(min(5, len(pres.slides))))
-        
-        for slide_idx in slide_indices:
-            if 0 <= slide_idx < len(pres.slides):
-                slide = pres.slides[slide_idx]
-                
-                for shape in slide.shapes:
-                    if hasattr(shape, 'image'):
-                        try:
-                            image_bytes = shape.image.blob
-                            att.images.append(base64.b64encode(image_bytes).decode())
-                        except:
-                            continue
-    except Exception as e:
-        print(f"Error extracting PowerPoint images: {e}")
+        # Try to import required libraries
+        import pypdfium2 as pdfium
+        import subprocess
+        import shutil
+        import tempfile
+        import os
+        from pathlib import Path
+        import base64
+        import io
+    except ImportError as e:
+        att.metadata['pptx_images_error'] = f"Required libraries not installed: {e}. Install with: pip install pypdfium2"
+        return att
     
-    return att
+    # Get resize parameter from DSL commands
+    resize = att.commands.get('resize_images')
+    
+    images = []
+    
+    try:
+        # Convert PPTX to PDF first (using LibreOffice/soffice like your office_contact_sheet.py)
+        def convert_pptx_to_pdf(pptx_path: str) -> str:
+            """Convert PPTX to PDF using LibreOffice/soffice."""
+            # Try to find LibreOffice or soffice
+            soffice = shutil.which("libreoffice") or shutil.which("soffice")
+            if not soffice:
+                raise RuntimeError("LibreOffice/soffice not found. Install LibreOffice to convert PPTX to PDF.")
+            
+            # Create temporary directory for PDF output
+            temp_dir = tempfile.mkdtemp()
+            pptx_path_obj = Path(pptx_path)
+            
+            # Run LibreOffice conversion
+            subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", temp_dir, str(pptx_path_obj)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60  # 60 second timeout
+            )
+            
+            # Find the generated PDF
+            pdf_path = Path(temp_dir) / (pptx_path_obj.stem + ".pdf")
+            if not pdf_path.exists():
+                raise RuntimeError(f"PDF conversion failed - output file not found: {pdf_path}")
+            
+            return str(pdf_path)
+        
+        # Convert PPTX to PDF
+        if not att.path:
+            raise RuntimeError("No file path available for PPTX conversion")
+        
+        pdf_path = convert_pptx_to_pdf(att.path)
+        
+        try:
+            # Open the PDF with pypdfium2
+            pdf_doc = pdfium.PdfDocument(pdf_path)
+            num_pages = len(pdf_doc)
+            
+            # Get selected slides (respects pages DSL command)
+            slide_indices = att.metadata.get('selected_slides', range(num_pages))
+            
+            # Convert slide indices to page indices (slides are 1-based, pages are 0-based)
+            if isinstance(slide_indices, range):
+                page_indices = list(slide_indices)
+            else:
+                # Convert 1-based slide numbers to 0-based page indices
+                page_indices = [idx if isinstance(slide_indices, range) else idx for idx in slide_indices]
+            
+            # Limit to reasonable number of slides
+            max_slides = min(num_pages, 20)
+            page_indices = page_indices[:max_slides]
+            
+            for page_idx in page_indices:
+                if 0 <= page_idx < num_pages:
+                    page = pdf_doc[page_idx]
+                    
+                    # Render at 2x scale for better quality (like PDF processor)
+                    pil_image = page.render(scale=2).to_pil()
+                    
+                    # Apply resize if specified
+                    if resize:
+                        if 'x' in resize:
+                            # Format: 800x600
+                            w, h = map(int, resize.split('x'))
+                            pil_image = pil_image.resize((w, h), pil_image.Resampling.LANCZOS)
+                        elif resize.endswith('%'):
+                            # Format: 50%
+                            scale = int(resize[:-1]) / 100
+                            new_width = int(pil_image.width * scale)
+                            new_height = int(pil_image.height * scale)
+                            pil_image = pil_image.resize((new_width, new_height), pil_image.Resampling.LANCZOS)
+                    
+                    # Convert to PNG bytes
+                    img_byte_arr = io.BytesIO()
+                    pil_image.save(img_byte_arr, format='PNG')
+                    png_bytes = img_byte_arr.getvalue()
+                    
+                    # Encode as base64 data URL (consistent with PDF processor)
+                    b64_string = base64.b64encode(png_bytes).decode('utf-8')
+                    images.append(f"data:image/png;base64,{b64_string}")
+            
+            # Clean up PDF document
+            pdf_doc.close()
+            
+        finally:
+            # Clean up temporary PDF file
+            try:
+                os.unlink(pdf_path)
+                os.rmdir(os.path.dirname(pdf_path))
+            except:
+                pass  # Ignore cleanup errors
+        
+        # Add images to attachment
+        att.images.extend(images)
+        
+        # Add metadata about image extraction (consistent with PDF processor)
+        att.metadata.update({
+            'pptx_slides_rendered': len(images),
+            'pptx_total_slides': num_pages,
+            'pptx_resize_applied': resize if resize else None,
+            'pptx_conversion_method': 'libreoffice_to_pdf'
+        })
+        
+        return att
+        
+    except subprocess.TimeoutExpired:
+        att.metadata['pptx_images_error'] = "PPTX to PDF conversion timed out (>60s)"
+        return att
+    except subprocess.CalledProcessError as e:
+        att.metadata['pptx_images_error'] = f"LibreOffice conversion failed: {e}"
+        return att
+    except Exception as e:
+        # Add error info to metadata instead of failing
+        att.metadata['pptx_images_error'] = f"Error rendering PPTX slides: {e}"
+        return att
+
 
 @presenter
 def images(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
@@ -692,5 +811,112 @@ def ocr(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
     except Exception as e:
         att.text += f"⚠️ **OCR failed**: {str(e)}\n\n"
         att.metadata['ocr_error'] = str(e)
+    
+    return att
+
+
+@presenter
+def text(att: Attachment, pres: 'pptx.Presentation') -> Attachment:
+    """Extract plain text from PowerPoint slides."""
+    att.text += f"Presentation: {att.path}\n"
+    att.text += "=" * len(f"Presentation: {att.path}") + "\n\n"
+    
+    try:
+        slide_indices = att.metadata.get('selected_slides', range(len(pres.slides)))
+        
+        for i, slide_idx in enumerate(slide_indices):
+            if 0 <= slide_idx < len(pres.slides):
+                slide = pres.slides[slide_idx]
+                att.text += f"[Slide {slide_idx + 1}]\n"
+                
+                slide_text = ""
+                for shape in slide.shapes:
+                    if hasattr(shape, 'text') and shape.text.strip():
+                        slide_text += f"{shape.text}\n"
+                
+                if slide_text.strip():
+                    att.text += f"{slide_text}\n"
+                else:
+                    att.text += "[No text content]\n\n"
+        
+        att.text += f"Slides processed: {len(slide_indices)}\n\n"
+    except Exception as e:
+        att.text += f"Error extracting slides: {e}\n\n"
+    
+    return att
+
+
+@presenter
+def xml(att: Attachment, pres: 'pptx.Presentation') -> Attachment:
+    """Extract raw PPTX XML content for detailed analysis."""
+    att.text += f"# PPTX XML Content: {att.path}\n\n"
+    
+    try:
+        import zipfile
+        import xml.dom.minidom
+        
+        # PPTX files are ZIP archives containing XML
+        with zipfile.ZipFile(att.path, 'r') as pptx_zip:
+            # Get slide indices to process
+            slide_indices = att.metadata.get('selected_slides', range(min(3, len(pres.slides))))
+            
+            att.text += "```xml\n"
+            att.text += "<!-- PPTX Structure Overview -->\n"
+            
+            # List all XML files in the PPTX
+            xml_files = [f for f in pptx_zip.namelist() if f.endswith('.xml')]
+            att.text += f"<!-- XML Files: {', '.join(xml_files[:10])}{'...' if len(xml_files) > 10 else ''} -->\n\n"
+            
+            # Extract slide XML content
+            for slide_idx in slide_indices:
+                slide_xml_path = f"ppt/slides/slide{slide_idx + 1}.xml"
+                
+                if slide_xml_path in pptx_zip.namelist():
+                    try:
+                        xml_content = pptx_zip.read(slide_xml_path).decode('utf-8')
+                        
+                        # Pretty print the XML
+                        dom = xml.dom.minidom.parseString(xml_content)
+                        pretty_xml = dom.toprettyxml(indent="  ")
+                        
+                        # Remove empty lines and XML declaration for cleaner output
+                        lines = [line for line in pretty_xml.split('\n') if line.strip()]
+                        if lines and lines[0].startswith('<?xml'):
+                            lines = lines[1:]  # Remove XML declaration
+                        
+                        att.text += f"<!-- Slide {slide_idx + 1} XML -->\n"
+                        att.text += '\n'.join(lines[:50])  # Limit to first 50 lines per slide
+                        if len(lines) > 50:
+                            att.text += f"\n<!-- ... truncated ({len(lines) - 50} more lines) -->\n"
+                        att.text += "\n\n"
+                        
+                    except Exception as e:
+                        att.text += f"<!-- Error parsing slide {slide_idx + 1} XML: {e} -->\n\n"
+                else:
+                    att.text += f"<!-- Slide {slide_idx + 1} XML not found -->\n\n"
+            
+            # Also include presentation.xml for overall structure
+            if "ppt/presentation.xml" in pptx_zip.namelist():
+                try:
+                    pres_xml = pptx_zip.read("ppt/presentation.xml").decode('utf-8')
+                    dom = xml.dom.minidom.parseString(pres_xml)
+                    pretty_xml = dom.toprettyxml(indent="  ")
+                    lines = [line for line in pretty_xml.split('\n') if line.strip()]
+                    if lines and lines[0].startswith('<?xml'):
+                        lines = lines[1:]
+                    
+                    att.text += "<!-- Presentation Structure XML -->\n"
+                    att.text += '\n'.join(lines[:30])  # Limit presentation XML
+                    if len(lines) > 30:
+                        att.text += f"\n<!-- ... truncated ({len(lines) - 30} more lines) -->\n"
+                    
+                except Exception as e:
+                    att.text += f"<!-- Error parsing presentation XML: {e} -->\n"
+            
+            att.text += "```\n\n"
+            att.text += f"*XML content extracted from {len(slide_indices)} slides*\n\n"
+            
+    except Exception as e:
+        att.text += f"```\n<!-- Error extracting PPTX XML: {e} -->\n```\n\n"
     
     return att

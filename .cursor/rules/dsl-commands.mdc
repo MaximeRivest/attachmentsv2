@@ -1,0 +1,62 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# DSL Command Development
+
+## Command Syntax Standards
+- Use square brackets: `[command:value]`
+- Separate options with pipe: `[format:plain|markdown|xml]`
+- Support ranges: `[pages:1-5,10,15-20]`
+- Use boolean values: `[images:true|false]`
+- Support percentages and dimensions: `[resize_images:50%|800x600]`
+
+## Format Aliases
+- Provide intuitive aliases: `text=plain`, `md=markdown`, `code=xml`
+- Document all aliases in processor docstring
+- Keep aliases consistent across processors
+
+## Command Categories
+
+### Content Selection
+- `[pages:range]` - Select specific pages/slides
+- `[sections:list]` - Select document sections
+- `[chapters:range]` - Select book chapters
+
+### Output Format
+- `[format:type]` - Output format (plain, markdown, xml, html)
+- `[encoding:type]` - Text encoding options
+- `[structure:type]` - Structural preservation options
+
+### Media Handling
+- `[images:boolean]` - Include/exclude images
+- `[resize_images:spec]` - Resize specifications
+- `[tile:layout]` - Image tiling layouts
+
+### Processing Options
+- `[quality:level]` - Processing quality/speed tradeoff
+- `[language:code]` - Language-specific processing
+- `[metadata:boolean]` - Include metadata
+
+## Implementation Pattern
+```python
+@processor(match_function)
+def processor_name(att: Attachment) -> Attachment:
+    """
+    Process format with DSL commands:
+    
+    [format:plain|markdown|xml] - Output format (default: markdown)
+    [pages:1-5,10] - Select specific pages
+    [images:true|false] - Include images (default: true)
+    
+    Format aliases: text=plain, md=markdown, code=xml
+    """
+    # Implementation here
+```
+
+## Error Handling
+- Validate command syntax early
+- Provide helpful error messages for invalid commands
+- Fall back to sensible defaults for malformed commands
+- Log warnings for deprecated command formats

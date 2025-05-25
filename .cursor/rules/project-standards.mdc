@@ -1,0 +1,40 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Attachments Library Project Standards
+
+## Project Context
+This is the **attachments** library - a Python package for processing various document formats (PDF, PPTX, etc.) with a pipeline-based architecture and DSL command system.
+
+## Core Philosophy
+- **Literate Programming**: All demos should follow Jupyter cell format with proper markdown documentation
+- **Type Safety**: Use comprehensive type hints throughout
+- **Pipeline Architecture**: Follow load → modify → present → refine pattern
+- **DSL Commands**: Provide intuitive command syntax for users
+- **Extensibility**: Make it easy to add new formats and processors
+
+## Communication Style
+- Be concise and focused in explanations
+- Use technical terminology appropriately
+- Provide concrete examples when explaining concepts
+- Reference existing patterns in the codebase
+
+## Code Generation Preferences
+- Prioritize readability and maintainability
+- Follow established patterns in the codebase
+- Use descriptive variable and function names
+- Include appropriate error handling
+- Add type hints to all new code
+
+## Documentation Standards
+- Use docstrings for all public APIs
+- Include DSL command documentation in processor docstrings
+- Provide usage examples in docstrings
+
+## When Creating New Features
+- Follow the existing architecture patterns
+- Create demo files using literate programming style
+- Update relevant documentation
+- DO NOT ADD BACKWARD COMPATIBILITY we are pre-release
