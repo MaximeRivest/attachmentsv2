@@ -19,7 +19,7 @@ def markdown(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
 
 @presenter
 def markdown(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
-    """Convert PDF to markdown with text extraction."""
+    """Convert PDF to markdown with text extraction. Handles scanned PDFs gracefully."""
     att.text += f"# PDF Document: {att.path}\n\n"
     
     try:
@@ -30,13 +30,62 @@ def markdown(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
             # Process ALL pages by default
             pages_to_process = range(1, len(pdf.pages) + 1)
         
+        total_text_length = 0
+        pages_with_text = 0
+        
         for page_num in pages_to_process:
             if 1 <= page_num <= len(pdf.pages):
                 page = pdf.pages[page_num - 1]
                 page_text = page.extract_text() or ""
-                att.text += f"## Page {page_num}\n\n{page_text}\n\n"
+                
+                # Track text statistics
+                if page_text.strip():
+                    pages_with_text += 1
+                    total_text_length += len(page_text.strip())
+                
+                # Only add page content if there's meaningful text
+                if page_text.strip():
+                    att.text += f"## Page {page_num}\n\n{page_text}\n\n"
+                else:
+                    # For pages with no text, add a placeholder
+                    att.text += f"## Page {page_num}\n\n*[No extractable text - likely scanned image]*\n\n"
         
-        att.text += f"*Total pages processed: {len(pages_to_process)}*\n\n"
+        # Detect if this is likely a scanned PDF
+        avg_text_per_page = total_text_length / len(pages_to_process) if pages_to_process else 0
+        is_likely_scanned = (
+            pages_with_text == 0 or  # No pages have text
+            avg_text_per_page < 50 or  # Very little text per page
+            pages_with_text / len(pages_to_process) < 0.3  # Less than 30% of pages have text
+        )
+        
+        if is_likely_scanned:
+            att.text += f"\n📄 **Document Analysis**: This appears to be a scanned PDF with little to no extractable text.\n\n"
+            att.text += f"- **Pages processed**: {len(pages_to_process)}\n"
+            att.text += f"- **Pages with text**: {pages_with_text}\n"
+            att.text += f"- **Average text per page**: {avg_text_per_page:.0f} characters\n\n"
+            att.text += f"💡 **Suggestions**:\n"
+            att.text += f"- Use the extracted images for vision-capable LLMs (Claude, GPT-4V)\n"
+            att.text += f"- Consider OCR tools like `pytesseract` for text extraction\n"
+            att.text += f"- The images are available in the `images` property for multimodal analysis\n\n"
+            
+            # Add metadata to help downstream processing
+            att.metadata.update({
+                'is_likely_scanned': True,
+                'pages_with_text': pages_with_text,
+                'total_pages': len(pages_to_process),
+                'avg_text_per_page': avg_text_per_page,
+                'text_extraction_quality': 'poor' if avg_text_per_page < 20 else 'limited'
+            })
+        else:
+            att.text += f"*Total pages processed: {len(pages_to_process)}*\n\n"
+            att.metadata.update({
+                'is_likely_scanned': False,
+                'pages_with_text': pages_with_text,
+                'total_pages': len(pages_to_process),
+                'avg_text_per_page': avg_text_per_page,
+                'text_extraction_quality': 'good'
+            })
+            
     except Exception as e:
         att.text += f"*Error extracting PDF text: {e}*\n\n"
     
@@ -97,7 +146,7 @@ def text(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
 
 @presenter
 def text(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
-    """Extract plain text from PDF."""
+    """Extract plain text from PDF. Handles scanned PDFs gracefully."""
     att.text += f"PDF Document: {att.path}\n"
     att.text += "=" * len(f"PDF Document: {att.path}") + "\n\n"
     
@@ -109,11 +158,64 @@ def text(att: Attachment, pdf: 'pdfplumber.PDF') -> Attachment:
             # Process ALL pages by default
             pages_to_process = range(1, len(pdf.pages) + 1)
         
+        total_text_length = 0
+        pages_with_text = 0
+        
         for page_num in pages_to_process:
             if 1 <= page_num <= len(pdf.pages):
                 page = pdf.pages[page_num - 1]
                 page_text = page.extract_text() or ""
-                att.text += f"[Page {page_num}]\n{page_text}\n\n"
+                
+                # Track text statistics
+                if page_text.strip():
+                    pages_with_text += 1
+                    total_text_length += len(page_text.strip())
+                
+                # Only add page content if there's meaningful text
+                if page_text.strip():
+                    att.text += f"[Page {page_num}]\n{page_text}\n\n"
+                else:
+                    # For pages with no text, add a placeholder
+                    att.text += f"[Page {page_num}]\n[No extractable text - likely scanned image]\n\n"
+        
+        # Detect if this is likely a scanned PDF (same logic as markdown presenter)
+        avg_text_per_page = total_text_length / len(pages_to_process) if pages_to_process else 0
+        is_likely_scanned = (
+            pages_with_text == 0 or  # No pages have text
+            avg_text_per_page < 50 or  # Very little text per page
+            pages_with_text / len(pages_to_process) < 0.3  # Less than 30% of pages have text
+        )
+        
+        if is_likely_scanned:
+            att.text += f"\nDOCUMENT ANALYSIS: This appears to be a scanned PDF with little to no extractable text.\n\n"
+            att.text += f"- Pages processed: {len(pages_to_process)}\n"
+            att.text += f"- Pages with text: {pages_with_text}\n"
+            att.text += f"- Average text per page: {avg_text_per_page:.0f} characters\n\n"
+            att.text += f"SUGGESTIONS:\n"
+            att.text += f"- Use the extracted images for vision-capable LLMs (Claude, GPT-4V)\n"
+            att.text += f"- Consider OCR tools like pytesseract for text extraction\n"
+            att.text += f"- The images are available in the images property for multimodal analysis\n\n"
+            
+            # Add metadata to help downstream processing (if not already added by markdown presenter)
+            if 'is_likely_scanned' not in att.metadata:
+                att.metadata.update({
+                    'is_likely_scanned': True,
+                    'pages_with_text': pages_with_text,
+                    'total_pages': len(pages_to_process),
+                    'avg_text_per_page': avg_text_per_page,
+                    'text_extraction_quality': 'poor' if avg_text_per_page < 20 else 'limited'
+                })
+        else:
+            # Add metadata for good text extraction (if not already added)
+            if 'is_likely_scanned' not in att.metadata:
+                att.metadata.update({
+                    'is_likely_scanned': False,
+                    'pages_with_text': pages_with_text,
+                    'total_pages': len(pages_to_process),
+                    'avg_text_per_page': avg_text_per_page,
+                    'text_extraction_quality': 'good'
+                })
+                
     except:
         att.text += "*Error extracting PDF text*\n\n"
     
@@ -491,3 +593,104 @@ def images(att: Attachment) -> Attachment:
 
 # Note: truncate function moved to refine.py as refine.truncate
 # This maintains clean separation: present extracts, refine processes
+
+# OCR PRESENTER for scanned PDFs
+@presenter
+def ocr(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
+    """
+    Extract text from scanned PDF using OCR (pytesseract).
+    
+    This presenter is useful for scanned PDFs with no extractable text.
+    Requires: pip install pytesseract pillow
+    Also requires tesseract binary: apt-get install tesseract-ocr (Ubuntu) or brew install tesseract (Mac)
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+        import pypdfium2 as pdfium
+        import io
+    except ImportError as e:
+        att.text += f"\n## OCR Text Extraction\n\n"
+        att.text += f"⚠️ **OCR not available**: Missing dependencies.\n\n"
+        att.text += f"To enable OCR for scanned PDFs:\n"
+        att.text += f"```bash\n"
+        att.text += f"pip install pytesseract pypdfium2\n"
+        att.text += f"# Ubuntu/Debian:\n"
+        att.text += f"sudo apt-get install tesseract-ocr\n"
+        att.text += f"# macOS:\n"
+        att.text += f"brew install tesseract\n"
+        att.text += f"```\n\n"
+        att.text += f"Error: {e}\n\n"
+        return att
+    
+    att.text += f"\n## OCR Text Extraction\n\n"
+    
+    try:
+        # Get PDF bytes for pypdfium2
+        if 'temp_pdf_path' in att.metadata:
+            with open(att.metadata['temp_pdf_path'], 'rb') as f:
+                pdf_bytes = f.read()
+        elif att.path:
+            with open(att.path, 'rb') as f:
+                pdf_bytes = f.read()
+        else:
+            att.text += "⚠️ **OCR failed**: Cannot access PDF file.\n\n"
+            return att
+        
+        # Open with pypdfium2
+        pdf_doc = pdfium.PdfDocument(pdf_bytes)
+        num_pages = len(pdf_doc)
+        
+        # Process pages (limit for performance)
+        if 'selected_pages' in att.metadata:
+            pages_to_process = att.metadata['selected_pages']
+        else:
+            # Limit OCR to first 5 pages by default (OCR is slow)
+            pages_to_process = range(1, min(6, num_pages + 1))
+        
+        total_ocr_text = ""
+        successful_pages = 0
+        
+        for page_num in pages_to_process:
+            if 1 <= page_num <= num_pages:
+                try:
+                    page = pdf_doc[page_num - 1]
+                    
+                    # Render page as image
+                    pil_image = page.render(scale=2).to_pil()  # Higher scale for better OCR
+                    
+                    # Perform OCR
+                    page_text = pytesseract.image_to_string(pil_image, lang='eng')
+                    
+                    if page_text.strip():
+                        att.text += f"### Page {page_num} (OCR)\n\n{page_text.strip()}\n\n"
+                        total_ocr_text += page_text.strip()
+                        successful_pages += 1
+                    else:
+                        att.text += f"### Page {page_num} (OCR)\n\n*[No text detected by OCR]*\n\n"
+                        
+                except Exception as e:
+                    att.text += f"### Page {page_num} (OCR)\n\n*[OCR failed: {str(e)}]*\n\n"
+        
+        # Clean up
+        pdf_doc.close()
+        
+        # Add OCR summary
+        att.text += f"**OCR Summary**:\n"
+        att.text += f"- Pages processed: {len(pages_to_process)}\n"
+        att.text += f"- Pages with OCR text: {successful_pages}\n"
+        att.text += f"- Total OCR text length: {len(total_ocr_text)} characters\n\n"
+        
+        # Update metadata
+        att.metadata.update({
+            'ocr_performed': True,
+            'ocr_pages_processed': len(pages_to_process),
+            'ocr_pages_successful': successful_pages,
+            'ocr_text_length': len(total_ocr_text)
+        })
+        
+    except Exception as e:
+        att.text += f"⚠️ **OCR failed**: {str(e)}\n\n"
+        att.metadata['ocr_error'] = str(e)
+    
+    return att
