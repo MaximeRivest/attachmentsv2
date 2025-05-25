@@ -17,6 +17,9 @@ def pdf_match(att: 'Attachment') -> bool:
 def pptx_match(att: 'Attachment') -> bool:
     return att.path.endswith(('.pptx', '.ppt'))
 
+def docx_match(att: 'Attachment') -> bool:
+    return att.path.endswith(('.docx', '.doc'))
+
 def image_match(att: 'Attachment') -> bool:
     return att.path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.heic', '.heif'))
 

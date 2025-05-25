@@ -99,6 +99,17 @@ def pptx_to_python_pptx(att: Attachment) -> Attachment:
     return att
 
 
+@loader(match=matchers.docx_match)
+def docx_to_python_docx(att: Attachment) -> Attachment:
+    """Load Word document using python-docx."""
+    try:
+        from docx import Document
+        att._obj = Document(att.path)
+    except ImportError:
+        raise ImportError("python-docx is required for Word document loading. Install with: pip install python-docx")
+    return att
+
+
 @loader(match=matchers.image_match)
 def image_to_pil(att: Attachment) -> Attachment:
     """Load image using PIL."""

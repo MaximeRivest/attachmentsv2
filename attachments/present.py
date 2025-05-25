@@ -502,6 +502,146 @@ def images(att: Attachment, pdf_reader: 'pdfplumber.PDF') -> Attachment:
         return att
 
 
+@presenter
+def images(att: Attachment, doc: 'docx.Document') -> Attachment:
+    """Convert DOCX pages to PNG images by converting to PDF first, then rendering."""
+    try:
+        # Try to import required libraries
+        import pypdfium2 as pdfium
+        import subprocess
+        import shutil
+        import tempfile
+        import os
+        from pathlib import Path
+        import base64
+        import io
+    except ImportError as e:
+        att.metadata['docx_images_error'] = f"Required libraries not installed: {e}. Install with: pip install pypdfium2"
+        return att
+    
+    # Get resize parameter from DSL commands
+    resize = att.commands.get('resize_images')
+    
+    images = []
+    
+    try:
+        # Convert DOCX to PDF first (using LibreOffice/soffice)
+        def convert_docx_to_pdf(docx_path: str) -> str:
+            """Convert DOCX to PDF using LibreOffice/soffice."""
+            # Try to find LibreOffice or soffice
+            soffice = shutil.which("libreoffice") or shutil.which("soffice")
+            if not soffice:
+                raise RuntimeError("LibreOffice/soffice not found. Install LibreOffice to convert DOCX to PDF.")
+            
+            # Create temporary directory for PDF output
+            temp_dir = tempfile.mkdtemp()
+            docx_path_obj = Path(docx_path)
+            
+            # Run LibreOffice conversion
+            subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", temp_dir, str(docx_path_obj)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60  # 60 second timeout
+            )
+            
+            # Find the generated PDF
+            pdf_path = Path(temp_dir) / (docx_path_obj.stem + ".pdf")
+            if not pdf_path.exists():
+                raise RuntimeError(f"PDF conversion failed - output file not found: {pdf_path}")
+            
+            return str(pdf_path)
+        
+        # Convert DOCX to PDF
+        if not att.path:
+            raise RuntimeError("No file path available for DOCX conversion")
+        
+        pdf_path = convert_docx_to_pdf(att.path)
+        
+        try:
+            # Open the PDF with pypdfium2
+            pdf_doc = pdfium.PdfDocument(pdf_path)
+            num_pages = len(pdf_doc)
+            
+            # Get selected pages (respects pages DSL command)
+            page_indices = att.metadata.get('selected_pages', range(1, num_pages + 1))
+            
+            # Convert to 0-based indices if they're 1-based
+            if isinstance(page_indices, range):
+                page_indices = [i - 1 for i in page_indices if 1 <= i <= num_pages]
+            else:
+                page_indices = [i - 1 for i in page_indices if 1 <= i <= num_pages]
+            
+            # Limit to reasonable number of pages
+            max_pages = min(num_pages, 20)
+            page_indices = page_indices[:max_pages]
+            
+            for page_idx in page_indices:
+                if 0 <= page_idx < num_pages:
+                    page = pdf_doc[page_idx]
+                    
+                    # Render at 2x scale for better quality (like PDF processor)
+                    pil_image = page.render(scale=2).to_pil()
+                    
+                    # Apply resize if specified
+                    if resize:
+                        if 'x' in resize:
+                            # Format: 800x600
+                            w, h = map(int, resize.split('x'))
+                            pil_image = pil_image.resize((w, h), pil_image.Resampling.LANCZOS)
+                        elif resize.endswith('%'):
+                            # Format: 50%
+                            scale = int(resize[:-1]) / 100
+                            new_width = int(pil_image.width * scale)
+                            new_height = int(pil_image.height * scale)
+                            pil_image = pil_image.resize((new_width, new_height), pil_image.Resampling.LANCZOS)
+                    
+                    # Convert to PNG bytes
+                    img_byte_arr = io.BytesIO()
+                    pil_image.save(img_byte_arr, format='PNG')
+                    png_bytes = img_byte_arr.getvalue()
+                    
+                    # Encode as base64 data URL (consistent with PDF processor)
+                    b64_string = base64.b64encode(png_bytes).decode('utf-8')
+                    images.append(f"data:image/png;base64,{b64_string}")
+            
+            # Clean up PDF document
+            pdf_doc.close()
+            
+        finally:
+            # Clean up temporary PDF file
+            try:
+                os.unlink(pdf_path)
+                os.rmdir(os.path.dirname(pdf_path))
+            except:
+                pass  # Ignore cleanup errors
+        
+        # Add images to attachment
+        att.images.extend(images)
+        
+        # Add metadata about image extraction (consistent with PDF processor)
+        att.metadata.update({
+            'docx_pages_rendered': len(images),
+            'docx_total_pages': num_pages,
+            'docx_resize_applied': resize if resize else None,
+            'docx_conversion_method': 'libreoffice_to_pdf'
+        })
+        
+        return att
+        
+    except subprocess.TimeoutExpired:
+        att.metadata['docx_images_error'] = "DOCX to PDF conversion timed out (>60s)"
+        return att
+    except subprocess.CalledProcessError as e:
+        att.metadata['docx_images_error'] = f"LibreOffice conversion failed: {e}"
+        return att
+    except Exception as e:
+        # Add error info to metadata instead of failing
+        att.metadata['docx_images_error'] = f"Error rendering DOCX pages: {e}"
+        return att
+
+
 # SUMMARY PRESENTERS
 @presenter
 def summary(att: Attachment, df: 'pandas.DataFrame') -> Attachment:
@@ -918,5 +1058,142 @@ def xml(att: Attachment, pres: 'pptx.Presentation') -> Attachment:
             
     except Exception as e:
         att.text += f"```\n<!-- Error extracting PPTX XML: {e} -->\n```\n\n"
+    
+    return att
+
+
+@presenter
+def text(att: Attachment, doc: 'docx.Document') -> Attachment:
+    """Extract plain text from DOCX document."""
+    att.text += f"Document: {att.path}\n"
+    att.text += "=" * len(f"Document: {att.path}") + "\n\n"
+    
+    try:
+        # Extract text from all paragraphs
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                att.text += f"{paragraph.text}\n\n"
+        
+        # Add basic document info
+        att.text += f"*Document processed: {len(doc.paragraphs)} paragraphs*\n\n"
+        
+    except Exception as e:
+        att.text += f"*Error extracting DOCX text: {e}*\n\n"
+    
+    return att
+
+
+@presenter
+def markdown(att: Attachment, doc: 'docx.Document') -> Attachment:
+    """Convert DOCX document to markdown with basic formatting."""
+    att.text += f"# Document: {att.path}\n\n"
+    
+    try:
+        # Extract text from all paragraphs with basic formatting
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                # Check if paragraph has heading style
+                if paragraph.style.name.startswith('Heading'):
+                    # Extract heading level from style name
+                    try:
+                        level = int(paragraph.style.name.split()[-1])
+                        heading_prefix = "#" * min(level + 1, 6)  # Limit to h6
+                        att.text += f"{heading_prefix} {paragraph.text}\n\n"
+                    except:
+                        # If we can't parse the heading level, treat as h2
+                        att.text += f"## {paragraph.text}\n\n"
+                else:
+                    # Regular paragraph
+                    att.text += f"{paragraph.text}\n\n"
+        
+        # Add document metadata
+        att.text += f"*Document processed: {len(doc.paragraphs)} paragraphs*\n\n"
+        
+    except Exception as e:
+        att.text += f"*Error extracting DOCX content: {e}*\n\n"
+    
+    return att
+
+
+@presenter
+def xml(att: Attachment, doc: 'docx.Document') -> Attachment:
+    """Extract raw DOCX XML content for detailed analysis."""
+    att.text += f"# DOCX XML Content: {att.path}\n\n"
+    
+    try:
+        import zipfile
+        import xml.dom.minidom
+        
+        # DOCX files are ZIP archives containing XML
+        with zipfile.ZipFile(att.path, 'r') as docx_zip:
+            att.text += "```xml\n"
+            att.text += "<!-- DOCX Structure Overview -->\n"
+            
+            # List all XML files in the DOCX
+            xml_files = [f for f in docx_zip.namelist() if f.endswith('.xml')]
+            att.text += f"<!-- XML Files: {', '.join(xml_files[:10])}{'...' if len(xml_files) > 10 else ''} -->\n\n"
+            
+            # Extract main document XML content
+            if "word/document.xml" in docx_zip.namelist():
+                try:
+                    xml_content = docx_zip.read("word/document.xml").decode('utf-8')
+                    
+                    # Pretty print the XML
+                    dom = xml.dom.minidom.parseString(xml_content)
+                    pretty_xml = dom.toprettyxml(indent="  ")
+                    
+                    # Remove empty lines and XML declaration for cleaner output
+                    lines = [line for line in pretty_xml.split('\n') if line.strip()]
+                    if lines and lines[0].startswith('<?xml'):
+                        lines = lines[1:]  # Remove XML declaration
+                    
+                    att.text += f"<!-- Main Document XML -->\n"
+                    att.text += '\n'.join(lines[:100])  # Limit to first 100 lines
+                    if len(lines) > 100:
+                        att.text += f"\n<!-- ... truncated ({len(lines) - 100} more lines) -->\n"
+                    att.text += "\n\n"
+                    
+                except Exception as e:
+                    att.text += f"<!-- Error parsing document XML: {e} -->\n\n"
+            
+            # Also include styles.xml for formatting information
+            if "word/styles.xml" in docx_zip.namelist():
+                try:
+                    styles_xml = docx_zip.read("word/styles.xml").decode('utf-8')
+                    dom = xml.dom.minidom.parseString(styles_xml)
+                    pretty_xml = dom.toprettyxml(indent="  ")
+                    lines = [line for line in pretty_xml.split('\n') if line.strip()]
+                    if lines and lines[0].startswith('<?xml'):
+                        lines = lines[1:]
+                    
+                    att.text += "<!-- Styles XML -->\n"
+                    att.text += '\n'.join(lines[:50])  # Limit styles XML
+                    if len(lines) > 50:
+                        att.text += f"\n<!-- ... truncated ({len(lines) - 50} more lines) -->\n"
+                    
+                except Exception as e:
+                    att.text += f"<!-- Error parsing styles XML: {e} -->\n"
+            
+            # Include document properties if available
+            if "docProps/core.xml" in docx_zip.namelist():
+                try:
+                    props_xml = docx_zip.read("docProps/core.xml").decode('utf-8')
+                    dom = xml.dom.minidom.parseString(props_xml)
+                    pretty_xml = dom.toprettyxml(indent="  ")
+                    lines = [line for line in pretty_xml.split('\n') if line.strip()]
+                    if lines and lines[0].startswith('<?xml'):
+                        lines = lines[1:]
+                    
+                    att.text += "\n\n<!-- Document Properties XML -->\n"
+                    att.text += '\n'.join(lines)
+                    
+                except Exception as e:
+                    att.text += f"\n<!-- Error parsing properties XML: {e} -->\n"
+            
+            att.text += "```\n\n"
+            att.text += f"*XML content extracted from DOCX structure*\n\n"
+            
+    except Exception as e:
+        att.text += f"```\n<!-- Error extracting DOCX XML: {e} -->\n```\n\n"
     
     return att
