@@ -1,3 +1,8 @@
+TEMPORARY REPO FOR ATTACHMENTS [WIP]
+WILL BE MOVED TO https://github.com/maximerivest/attachments
+JUST HERE SO ITS BACKUP.
+
+
 # 🔗 Attachments
 
 **The Python funnel for LLM context** — Turn any file into model-ready text + images, in one line.
