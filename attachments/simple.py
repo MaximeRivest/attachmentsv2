@@ -9,9 +9,9 @@ High-level interface that abstracts the grammar complexity:
 - ctx.images - all base64 images ready for LLMs
 """
 
-from typing import List, Union
-from .core import Attachment, AttachmentCollection, attach
+from typing import List, Union, Dict, Any
 import os
+from .core import Attachment, AttachmentCollection, attach, _loaders, _modifiers, _presenters, _adapters, _refiners, SmartVerbNamespace
 
 # Import the namespace objects, not the raw modules
 # We can't use relative imports for the namespaces since they're created in __init__.py
@@ -139,10 +139,38 @@ class Attachments:
         
         for i, att in enumerate(self.attachments):
             if att.text:
-                # Add file header if multiple files
+                # Add file header if multiple files AND text doesn't already have a header
                 if len(self.attachments) > 1:
                     filename = att.path or f"File {i+1}"
-                    section = f"## {filename}\n\n{att.text}"
+                    
+                    # Check if text already starts with a header for this file
+                    # Common patterns from presenters
+                    basename = os.path.basename(filename)
+                    
+                    header_patterns = [
+                        f"# {filename}",
+                        f"# {basename}",  
+                        f"# PDF Document: {filename}",
+                        f"# PDF Document: {basename}",
+                        f"# Image: {filename}",
+                        f"# Image: {basename}",
+                        f"# Presentation: {filename}",
+                        f"# Presentation: {basename}",
+                        f"## Data from {filename}",
+                        f"## Data from {basename}",
+                        f"Data from {filename}",
+                        f"Data from {basename}",
+                        f"PDF Document: {filename}",
+                        f"PDF Document: {basename}",
+                    ]
+                    
+                    # Check if text already has a header
+                    has_header = any(att.text.strip().startswith(pattern) for pattern in header_patterns)
+                    
+                    if has_header:
+                        section = att.text
+                    else:
+                        section = f"## {filename}\n\n{att.text}"
                 else:
                     section = att.text
                 

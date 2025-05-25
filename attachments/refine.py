@@ -25,11 +25,39 @@ def truncate(att: Attachment, limit: int = None) -> Attachment:
 def add_headers(att: Attachment) -> Attachment:
     """Add markdown headers to text content."""
     if att.text:
-        # Simple header addition - could be enhanced with DSL commands
-        lines = att.text.split('\n')
-        if lines and not lines[0].startswith('#'):
-            filename = getattr(att, 'path', 'Document')
+        # Check if a header already exists for this file anywhere in the text
+        filename = getattr(att, 'path', 'Document')
+        
+        # Common header patterns that presenters might use
+        header_patterns = [
+            f"# {filename}",                    # Full path header
+            f"# PDF Document: {filename}",       # PDF presenter pattern
+            f"# Image: {filename}",              # Image presenter pattern  
+            f"# Presentation: {filename}",       # PowerPoint presenter pattern
+            f"## Data from {filename}",          # DataFrame presenter pattern
+            f"Data from {filename}",             # Plain text presenter pattern
+            f"PDF Document: {filename}",         # Plain text PDF pattern
+        ]
+        
+        # Also check for just the basename in headers (in case of long paths)
+        import os
+        basename = os.path.basename(filename) if filename else 'Document'
+        if basename != filename:
+            header_patterns.extend([
+                f"# {basename}",
+                f"# PDF Document: {basename}",
+                f"# Image: {basename}",
+                f"# Presentation: {basename}",
+                f"## Data from {basename}",
+            ])
+        
+        # Check if any header pattern already exists
+        has_header = any(pattern in att.text for pattern in header_patterns)
+        
+        # Only add header if none exists
+        if not has_header:
             att.text = f"# {filename}\n\n{att.text}"
+    
     return att
 
 @refiner

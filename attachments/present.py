@@ -411,16 +411,42 @@ def head(att: Attachment) -> Attachment:
 
 @presenter
 def metadata(att: Attachment) -> Attachment:
-    """Add attachment metadata to text."""
+    """Add attachment metadata to text (user-friendly version)."""
     try:
-        meta_text = f"\n## Metadata\n\n"
+        # Filter metadata to show only user-relevant information
+        user_friendly_keys = {
+            'format', 'size', 'mode', 'content_type', 'status_code', 
+            'file_size', 'pdf_pages_rendered', 'pdf_total_pages',
+            'collection_size', 'from_zip', 'zip_filename'
+        }
+        
+        # Collect user-friendly metadata
+        relevant_meta = {}
         for key, value in att.metadata.items():
-            meta_text += f"- **{key}**: {value}\n"
-        if not att.metadata:
-            meta_text += "*No metadata available*\n"
-        att.text += meta_text + "\n"
+            if key in user_friendly_keys:
+                relevant_meta[key] = value
+            elif key.endswith('_error'):
+                # Show errors as they're important for users
+                relevant_meta[key] = value
+        
+        if relevant_meta:
+            meta_text = f"\n## File Info\n\n"
+            for key, value in relevant_meta.items():
+                # Format key names to be more readable
+                display_key = key.replace('_', ' ').title()
+                if key == 'size' and isinstance(value, tuple):
+                    meta_text += f"- **{display_key}**: {value[0]} × {value[1]} pixels\n"
+                elif key == 'pdf_pages_rendered':
+                    meta_text += f"- **Pages Rendered**: {value}\n"
+                elif key == 'pdf_total_pages':
+                    meta_text += f"- **Total Pages**: {value}\n"
+                else:
+                    meta_text += f"- **{display_key}**: {value}\n"
+            att.text += meta_text + "\n"
+        # If no relevant metadata, don't add anything (cleaner output)
+        
     except Exception as e:
-        att.text += f"\n*Error displaying metadata: {e}*\n\n"
+        att.text += f"\n*Error displaying file info: {e}*\n\n"
     return att
 
 

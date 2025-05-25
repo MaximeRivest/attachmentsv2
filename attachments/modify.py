@@ -358,4 +358,4 @@ def watermark(att: Attachment, img: 'PIL.Image.Image') -> Attachment:
             'operation': 'watermark',
             'error': str(e)
         })
-        return att
+    return att

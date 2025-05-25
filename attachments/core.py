@@ -349,7 +349,7 @@ def presenter(func=None, *, category=None):
     
     Args:
         func: The presenter function to register
-        category: Optional explicit category ('text', 'image', 'both', or None for auto-detection)
+        category: Optional explicit category ('text', 'image', or None for auto-detection)
         
     Examples:
         @presenter
@@ -360,9 +360,6 @@ def presenter(func=None, *, category=None):
         
         @presenter(category='image') 
         def explicit_image(att, data): ...  # Explicitly categorized as image
-        
-        @presenter(category='both')
-        def mixed_content(att, data): ...  # Always runs regardless of focus
     """
     def decorator(func):
         import inspect
@@ -382,30 +379,35 @@ def presenter(func=None, *, category=None):
             if presenter_category is None:
                 presenter_category = _detect_presenter_category(func, presenter_name)
             
-            # Check format and focus preferences from DSL commands
-            format_type = att.commands.get('format')  # Don't default to markdown
-            focus_type = att.commands.get('focus', 'both')        # Default to both
+            # Get DSL commands with cleaner approach
+            include_images = att.commands.get('images', 'true').lower() != 'false'  # Images on by default
+            text_format = att.commands.get('format', 'markdown')  # How to format text: plain|markdown|code
             
-            # Apply format filtering (only when format is explicitly specified)
-            if format_type is not None and presenter_category in ('text', 'both'):
-                if format_type == 'text' and presenter_name == 'markdown':
-                    # Skip markdown presenter if text format is explicitly requested
-                    return att
-                elif format_type == 'markdown' and presenter_name == 'text':
-                    # Skip text presenter if markdown format is explicitly requested  
-                    return att
-                elif format_type == 'structured' and presenter_name in {'text'}:
-                    # For structured format, prefer markdown over plain text
-                    return att
+            # Apply image filtering (images can be turned off)
+            if not include_images and presenter_category == 'image':
+                # Skip image presenters if images are disabled
+                return att
             
-            # Apply focus filtering
-            if focus_type == 'text' and presenter_category == 'image':
-                # Skip image presenters if focus is text-only
-                return att
-            elif focus_type == 'images' and presenter_category == 'text':
-                # Skip text presenters if focus is images-only
-                return att
-            # focus_type == 'both' or presenter_category == 'both' allows all presenters to run
+            # Apply text format filtering - only for text presenters
+            if presenter_category == 'text':
+                # Normalize format aliases and map to presenter names
+                if text_format in ('plain', 'text', 'txt'):
+                    preferred_presenter = 'text'
+                elif text_format in ('markdown', 'md'):
+                    preferred_presenter = 'markdown'
+                elif text_format in ('code', 'structured', 'html', 'xml', 'json'):
+                    # For code formats, prefer structured presenters, fallback to markdown
+                    if presenter_name in ('html', 'xml', 'csv'):
+                        # Let structured presenters run for code format
+                        preferred_presenter = presenter_name
+                    else:
+                        preferred_presenter = 'markdown'  # Fallback for code format
+                else:
+                    preferred_presenter = 'markdown'  # Default
+                
+                # Skip non-preferred text presenters
+                if presenter_name in ('text', 'markdown') and presenter_name != preferred_presenter:
+                    return att
             
             # If we get here, the presenter should run
             return func(att, *args, **kwargs)
@@ -441,24 +443,7 @@ def _detect_presenter_category(func: Callable, presenter_name: str) -> str:
     Returns:
         'text': Presenter that primarily works with text content
         'image': Presenter that primarily works with images  
-        'both': Presenter that works with both or should always run
     """
-    
-    # Known text presenters (legacy hardcoded list for backward compatibility)
-    known_text_presenters = {
-        'text', 'markdown', 'csv', 'xml', 'html', 'head', 'summary', 'metadata'
-    }
-    
-    # Known image presenters (legacy hardcoded list for backward compatibility)  
-    known_image_presenters = {
-        'images', 'thumbnails', 'contact_sheet'
-    }
-    
-    # Check legacy lists first for backward compatibility
-    if presenter_name in known_text_presenters:
-        return 'text'
-    elif presenter_name in known_image_presenters:
-        return 'image'
     
     # Auto-detect based on function name patterns
     text_patterns = ['text', 'markdown', 'csv', 'xml', 'html', 'json', 'yaml', 'summary', 'head', 'metadata']
@@ -466,13 +451,13 @@ def _detect_presenter_category(func: Callable, presenter_name: str) -> str:
     
     name_lower = presenter_name.lower()
     
+    # Check for image patterns first (more specific)
+    if any(pattern in name_lower for pattern in image_patterns):
+        return 'image'
+    
     # Check for text patterns
     if any(pattern in name_lower for pattern in text_patterns):
         return 'text'
-    
-    # Check for image patterns  
-    if any(pattern in name_lower for pattern in image_patterns):
-        return 'image'
     
     # Try to analyze the function source code for hints (best effort)
     try:
@@ -483,16 +468,16 @@ def _detect_presenter_category(func: Callable, presenter_name: str) -> str:
         text_indicators = source.count('att.text') + source.count('.text ') + source.count('text =')
         image_indicators = source.count('att.images') + source.count('.images') + source.count('images.append')
         
-        if text_indicators > image_indicators:
-            return 'text'
-        elif image_indicators > text_indicators:
+        if image_indicators > text_indicators:
             return 'image'
+        elif text_indicators > 0:
+            return 'text'
     except:
         # If source analysis fails, fall back to safe default
         pass
     
-    # Default to 'both' for unknown presenters (safe default - always runs)
-    return 'both'
+    # Default to 'text' for unknown presenters (safe default - always runs)
+    return 'text'
 
 
 def adapter(func):

@@ -84,29 +84,30 @@ ctx = Attachments(
 ```
 
 ### **Smart Content Filtering**
-Control what content gets extracted with `format` and `focus` commands:
+Control content extraction with clean DSL commands:
 
 ```python
-# Format control - choose output style
-ctx = Attachments("report.pdf[format:text]")      # Plain text only
+# Text formatting control
+ctx = Attachments("report.pdf[format:plain]")     # Plain text formatting
 ctx = Attachments("report.pdf[format:markdown]")  # Markdown formatting (default)
-ctx = Attachments("report.pdf[format:structured]") # Structured data
+ctx = Attachments("report.pdf[format:code]")      # Structured/code formatting
 
-# Focus control - choose content types  
-ctx = Attachments("report.pdf[focus:text]")       # Text content only
-ctx = Attachments("report.pdf[focus:images]")     # Images only
-ctx = Attachments("report.pdf[focus:both]")       # Both text and images (default)
+# Image control
+ctx = Attachments("report.pdf[images:false]")     # Text only, no images
+ctx = Attachments("report.pdf[images:true]")      # Include images (default)
 
 # Combine for precise control
-ctx = Attachments("report.pdf[format:text][focus:text]")  # Plain text, no images
+ctx = Attachments("report.pdf[format:plain][images:false]")  # Plain text only
 ```
 
 **How it works**: The `@presenter` decorator automatically filters presenters based on these commands:
-- `format:text` → skips markdown presenters, uses text presenters
-- `format:markdown` → skips text presenters, uses markdown presenters  
-- `focus:text` → skips image presenters (`images`, `thumbnails`)
-- `focus:images` → skips text presenters (`text`, `markdown`, `summary`)
-- `focus:both` → allows all presenters (default behavior)
+- `format:plain` → uses plain text presenter only
+- `format:markdown` → uses markdown presenter only (default)
+- `format:code` → uses structured presenters (HTML, XML, etc.)
+- `images:false` → skips image presenters
+- `images:true` → includes image presenters (default)
+
+**Aliases**: `text=plain`, `txt=plain`, `md=markdown`
 
 ### **Direct API Integration**
 ```python
@@ -427,6 +428,13 @@ result = (attach("sales_data.csv[limit:1000]")
          | adapt.openai_chat("What trends do you see?"))
 ```
 
+### **🎭 Multimodal Processing with DSL**
+```python
+# Multimodal processing with DSL
+visual_analysis = Attachments("presentation.pdf[format:markdown][images:true]")
+insights = visual_analysis.claude("Analyze both the text and visual elements")
+```
+
 ---
 
 ## 🧠 **DSPy Integration**
@@ -669,7 +677,7 @@ result = rag(
 )
 
 # 4. Multimodal processing with DSL
-visual_analysis = Attachments("presentation.pdf[focus:both][resize:1200x800]")
+visual_analysis = Attachments("presentation.pdf[format:markdown][images:true]")
 insights = visual_analysis.claude("Analyze both the text and visual elements")
 
 # 5. Batch processing pattern
@@ -754,7 +762,7 @@ def always_run_presenter(att: Attachment, data: dict) -> Attachment:
     return att
 
 # Usage with automatic filtering
-result = attach("data.csv[format:text][focus:text]") | load.csv_to_pandas | (
+result = attach("data.csv[format:plain][images:false]") | load.csv_to_pandas | (
     present.json_format +           # ✅ Runs (auto-detected as text)
     present.chart_visualization +   # ❌ Skipped (auto-detected as image)
     present.custom_text_format +    # ✅ Runs (explicit text)
@@ -827,7 +835,7 @@ def special_presenter(att: Attachment, data) -> Attachment:
 ```
 
 **That's it!** Your presenters automatically:
-- ✅ Work with DSL filtering (`[focus:text]`, `[focus:images]`)
+- ✅ Work with DSL filtering (`[format:plain]`, `[images:false]`)
 - ✅ Integrate with additive pipelines (`present.a + present.b`)
 - ✅ Support type dispatch for different data types
 - ✅ Get proper categorization based on naming
@@ -949,7 +957,7 @@ def special_presenter(att: Attachment, data) -> Attachment:
 ```
 
 **That's it!** Your presenters automatically:
-- ✅ Work with DSL filtering (`[focus:text]`, `[focus:images]`)
+- ✅ Work with DSL filtering (`[format:plain]`, `[images:false]`)
 - ✅ Integrate with additive pipelines (`present.a + present.b`)
 - ✅ Support type dispatch for different data types
 - ✅ Get proper categorization based on naming

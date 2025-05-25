@@ -3,17 +3,23 @@ PDF to LLM Pipeline Processor
 ============================
 
 Complete pipeline for processing PDF files optimized for LLM consumption.
-Supports DSL commands for format and focus customization.
+Supports clean DSL commands for the Attachments() simple API.
 
 DSL Commands:
-    [format:markdown|text] - Output format preference (default to markdown)
-    [focus:text|images|both] - Content focus
+    [images:true|false] - Include images (default: true)
+    [format:plain|markdown|code] - Text formatting (default: markdown)
+        Aliases: text=plain, txt=plain, md=markdown
     [pages:1-5,10] - Specific pages (inherits from existing modify.pages)
     [resize:50%|800x600] - Image resize specification
 
 Usage:
     # Explicit processor access
     result = processors.pdf_to_llm(attach("doc.pdf"))
+    
+    # With DSL commands
+    result = processors.pdf_to_llm(attach("doc.pdf[format:plain][images:false]"))
+    result = processors.pdf_to_llm(attach("doc.pdf[format:md]"))  # markdown alias
+    result = processors.pdf_to_llm(attach("doc.pdf[images:false]"))  # text only
     
     # Mixing with verbs (power users)
     result = processors.pdf_to_llm(attach("doc.pdf")) | refine.custom_step
@@ -28,15 +34,16 @@ from . import processor
 
 @processor(
     match=pdf_match,
-    description="Primary PDF processor with format and focus options"
+    description="Primary PDF processor with clean DSL commands"
 )
 def pdf_to_llm(att: Attachment) -> Attachment:
     """
     Process PDF files for LLM consumption.
     
-    Supports DSL commands:
-    - format: markdown
-    - focus: text, images, otherwise default to both
+    Supports DSL commands (for Attachments() simple API):
+    - images: true, false (default: true)
+    - format: plain, markdown, code (default: markdown)
+      Aliases: text=plain, txt=plain, md=markdown
     - resize_images: 50%, 800x600 (for images)
     """
     
@@ -44,6 +51,7 @@ def pdf_to_llm(att: Attachment) -> Attachment:
     from .. import load, modify, present, refine, attach
     
     # Enhanced pipeline with both text and images
+    # Smart filtering will choose based on DSL commands
     return (att 
            | load.pdf_to_pdfplumber 
            | modify.pages  # Optional - only acts if [pages:...] present
