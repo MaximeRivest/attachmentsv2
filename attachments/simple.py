@@ -17,8 +17,8 @@ import os
 # We can't use relative imports for the namespaces since they're created in __init__.py
 def _get_namespaces():
     """Get the namespace objects after they're created."""
-    from attachments import load, present, refine
-    return load, present, refine
+    from attachments import load, present, refine, split
+    return load, present, refine, split
 
 # Cache the namespaces
 _namespaces = None
@@ -69,7 +69,7 @@ class Attachments:
         """Universal pipeline that handles any file type automatically."""
         
         # Get the proper namespaces
-        load, present, refine = _get_cached_namespaces()
+        load, present, refine, split = _get_cached_namespaces()
         
         # Smart loader chain - order matters for proper fallback
         # Put more specific loaders first, more general ones last
@@ -191,19 +191,20 @@ class Attachments:
         type_summary = ', '.join(set(file_types)) if file_types else 'mixed'
         return f"Attachments({len(self.attachments)} files: {type_summary}, {len(self.images)} images)"
     
-    # LLM API convenience methods
-    
-    def claude(self, prompt: str = "") -> List[dict]:
-        """Get Claude API format directly."""
-        from .adapt import claude
-        combined_att = self._to_single_attachment()
-        return claude(combined_att, prompt)
-    
-    def openai(self, prompt: str = "") -> List[dict]:
-        """Get OpenAI Chat API format directly.""" 
-        from .adapt import openai_chat
-        combined_att = self._to_single_attachment()
-        return openai_chat(combined_att, prompt)
+    def __getattr__(self, name: str):
+        """Automatically expose all adapters as methods on Attachments objects."""
+        # Import here to avoid circular imports
+        from .core import _adapters
+        
+        if name in _adapters:
+            def adapter_method(*args, **kwargs):
+                """Dynamically created adapter method."""
+                adapter_fn = _adapters[name]
+                combined_att = self._to_single_attachment()
+                return adapter_fn(combined_att, *args, **kwargs)
+            return adapter_method
+        
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
     
     def _to_single_attachment(self) -> Attachment:
         """Convert to single attachment for API adapters."""

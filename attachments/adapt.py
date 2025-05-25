@@ -85,3 +85,8 @@ def claude(input_obj: Union[Attachment, AttachmentCollection], prompt: str = "")
     
     return [{"role": "user", "content": content}]
 
+@adapter
+def openai(input_obj: Union[Attachment, AttachmentCollection], prompt: str = "") -> List[Dict[str, Any]]:
+    """Alias for openai_chat - backwards compatibility with simple API."""
+    return openai_chat(input_obj, prompt)
+
