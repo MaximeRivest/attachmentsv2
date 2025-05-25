@@ -19,6 +19,7 @@ from .pipelines import pdf_processor as _pdf_processor_module
 from .pipelines import image_processor as _image_processor_module
 from .pipelines import pptx_processor as _pptx_processor_module
 from .pipelines import docx_processor as _docx_processor_module
+from .pipelines import excel_processor as _excel_processor_module
 #from .pipelines import example_processors as _example_processors_module
 
 # Import data module for sample data access

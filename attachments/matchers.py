@@ -20,6 +20,9 @@ def pptx_match(att: 'Attachment') -> bool:
 def docx_match(att: 'Attachment') -> bool:
     return att.path.endswith(('.docx', '.doc'))
 
+def excel_match(att: 'Attachment') -> bool:
+    return att.path.endswith(('.xlsx', '.xls'))
+
 def image_match(att: 'Attachment') -> bool:
     return att.path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.heic', '.heif'))
 

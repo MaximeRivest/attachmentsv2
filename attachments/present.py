@@ -1197,3 +1197,256 @@ def xml(att: Attachment, doc: 'docx.Document') -> Attachment:
         att.text += f"```\n<!-- Error extracting DOCX XML: {e} -->\n```\n\n"
     
     return att
+
+
+@presenter
+def text(att: Attachment, workbook: 'openpyxl.Workbook') -> Attachment:
+    """Extract plain text summary from Excel workbook."""
+    att.text += f"Workbook: {att.path}\n"
+    att.text += "=" * len(f"Workbook: {att.path}") + "\n\n"
+    
+    try:
+        # Get selected sheets (respects pages DSL command for sheet selection)
+        sheet_indices = att.metadata.get('selected_sheets', range(len(workbook.worksheets)))
+        
+        for i, sheet_idx in enumerate(sheet_indices):
+            if 0 <= sheet_idx < len(workbook.worksheets):
+                sheet = workbook.worksheets[sheet_idx]
+                att.text += f"[Sheet {sheet_idx + 1}: {sheet.title}]\n"
+                
+                # Get sheet dimensions
+                max_row = sheet.max_row
+                max_col = sheet.max_column
+                att.text += f"Dimensions: {max_row} rows × {max_col} columns\n"
+                
+                # Show first few rows as preview
+                preview_rows = min(5, max_row)
+                for row_idx in range(1, preview_rows + 1):
+                    row_data = []
+                    for col_idx in range(1, min(6, max_col + 1)):  # First 5 columns
+                        cell = sheet.cell(row=row_idx, column=col_idx)
+                        value = str(cell.value) if cell.value is not None else ""
+                        row_data.append(value[:20])  # Truncate long values
+                    att.text += f"Row {row_idx}: {' | '.join(row_data)}\n"
+                
+                if max_row > preview_rows:
+                    att.text += f"... ({max_row - preview_rows} more rows)\n"
+                att.text += "\n"
+        
+        att.text += f"*Workbook processed: {len(sheet_indices)} sheets*\n\n"
+        
+    except Exception as e:
+        att.text += f"*Error extracting Excel content: {e}*\n\n"
+    
+    return att
+
+
+@presenter
+def markdown(att: Attachment, workbook: 'openpyxl.Workbook') -> Attachment:
+    """Convert Excel workbook to markdown with sheet summaries and basic table previews."""
+    att.text += f"# Workbook: {att.path}\n\n"
+    
+    try:
+        # Get selected sheets (respects pages DSL command for sheet selection)
+        sheet_indices = att.metadata.get('selected_sheets', range(len(workbook.worksheets)))
+        
+        for i, sheet_idx in enumerate(sheet_indices):
+            if 0 <= sheet_idx < len(workbook.worksheets):
+                sheet = workbook.worksheets[sheet_idx]
+                att.text += f"## Sheet {sheet_idx + 1}: {sheet.title}\n\n"
+                
+                # Get sheet dimensions
+                max_row = sheet.max_row
+                max_col = sheet.max_column
+                att.text += f"**Dimensions**: {max_row} rows × {max_col} columns\n\n"
+                
+                # Create a markdown table preview (first 5 rows, first 5 columns)
+                preview_rows = min(6, max_row + 1)  # +1 to include header
+                preview_cols = min(5, max_col)
+                
+                if max_row > 0 and max_col > 0:
+                    att.text += "**Preview**:\n\n"
+                    
+                    # Build markdown table
+                    table_rows = []
+                    for row_idx in range(1, preview_rows):
+                        row_data = []
+                        for col_idx in range(1, preview_cols + 1):
+                            cell = sheet.cell(row=row_idx, column=col_idx)
+                            value = str(cell.value) if cell.value is not None else ""
+                            # Clean value for markdown table
+                            value = value.replace("|", "\\|").replace("\n", " ")[:30]
+                            row_data.append(value)
+                        table_rows.append(row_data)
+                    
+                    if table_rows:
+                        # Create markdown table
+                        header = table_rows[0] if table_rows else ["Col1", "Col2", "Col3", "Col4", "Col5"]
+                        att.text += "| " + " | ".join(header[:preview_cols]) + " |\n"
+                        att.text += "|" + "---|" * preview_cols + "\n"
+                        
+                        for row in table_rows[1:]:
+                            att.text += "| " + " | ".join(row[:preview_cols]) + " |\n"
+                        
+                        if max_row > preview_rows - 1:
+                            att.text += f"\n*... and {max_row - (preview_rows - 1)} more rows*\n"
+                        if max_col > preview_cols:
+                            att.text += f"*... and {max_col - preview_cols} more columns*\n"
+                    
+                    att.text += "\n"
+                else:
+                    att.text += "*Empty sheet*\n\n"
+        
+        att.text += f"*Workbook processed: {len(sheet_indices)} sheets*\n\n"
+        
+    except Exception as e:
+        att.text += f"*Error extracting Excel content: {e}*\n\n"
+    
+    return att
+
+
+@presenter
+def images(att: Attachment, workbook: 'openpyxl.Workbook') -> Attachment:
+    """Convert Excel sheets to PNG images by converting to PDF first, then rendering.
+    
+    Future improvements:
+    - Direct Excel-to-image conversion using xlwings or similar
+    - Better handling of large sheets with automatic scaling
+    - Support for chart extraction
+    - Custom sheet selection and formatting options
+    """
+    try:
+        # Try to import required libraries
+        import pypdfium2 as pdfium
+        import subprocess
+        import shutil
+        import tempfile
+        import os
+        from pathlib import Path
+        import base64
+        import io
+    except ImportError as e:
+        att.metadata['excel_images_error'] = f"Required libraries not installed: {e}. Install with: pip install pypdfium2"
+        return att
+    
+    # Get resize parameter from DSL commands
+    resize = att.commands.get('resize_images')
+    
+    images = []
+    
+    try:
+        # Convert Excel to PDF first (using LibreOffice/soffice)
+        def convert_excel_to_pdf(excel_path: str) -> str:
+            """Convert Excel to PDF using LibreOffice/soffice."""
+            # Try to find LibreOffice or soffice
+            soffice = shutil.which("libreoffice") or shutil.which("soffice")
+            if not soffice:
+                raise RuntimeError("LibreOffice/soffice not found. Install LibreOffice to convert Excel to PDF.")
+            
+            # Create temporary directory for PDF output
+            temp_dir = tempfile.mkdtemp()
+            excel_path_obj = Path(excel_path)
+            
+            # Run LibreOffice conversion
+            subprocess.run(
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", temp_dir, str(excel_path_obj)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=60  # 60 second timeout
+            )
+            
+            # Find the generated PDF
+            pdf_path = Path(temp_dir) / (excel_path_obj.stem + ".pdf")
+            if not pdf_path.exists():
+                raise RuntimeError(f"PDF conversion failed - output file not found: {pdf_path}")
+            
+            return str(pdf_path)
+        
+        # Convert Excel to PDF
+        if not att.path:
+            raise RuntimeError("No file path available for Excel conversion")
+        
+        pdf_path = convert_excel_to_pdf(att.path)
+        
+        try:
+            # Open the PDF with pypdfium2
+            pdf_doc = pdfium.PdfDocument(pdf_path)
+            num_pages = len(pdf_doc)
+            
+            # Get selected sheets (respects pages DSL command, treating pages as sheets)
+            sheet_indices = att.metadata.get('selected_sheets', range(num_pages))
+            
+            # Convert to 0-based indices if they're 1-based
+            if isinstance(sheet_indices, range):
+                page_indices = [i for i in sheet_indices if 0 <= i < num_pages]
+            else:
+                page_indices = [i - 1 for i in sheet_indices if 1 <= i <= num_pages]
+            
+            # Limit to reasonable number of sheets
+            max_sheets = min(num_pages, 20)
+            page_indices = page_indices[:max_sheets]
+            
+            for page_idx in page_indices:
+                if 0 <= page_idx < num_pages:
+                    page = pdf_doc[page_idx]
+                    
+                    # Render at 2x scale for better quality (like PDF processor)
+                    pil_image = page.render(scale=2).to_pil()
+                    
+                    # Apply resize if specified
+                    if resize:
+                        if 'x' in resize:
+                            # Format: 800x600
+                            w, h = map(int, resize.split('x'))
+                            pil_image = pil_image.resize((w, h), pil_image.Resampling.LANCZOS)
+                        elif resize.endswith('%'):
+                            # Format: 50%
+                            scale = int(resize[:-1]) / 100
+                            new_width = int(pil_image.width * scale)
+                            new_height = int(pil_image.height * scale)
+                            pil_image = pil_image.resize((new_width, new_height), pil_image.Resampling.LANCZOS)
+                    
+                    # Convert to PNG bytes
+                    img_byte_arr = io.BytesIO()
+                    pil_image.save(img_byte_arr, format='PNG')
+                    png_bytes = img_byte_arr.getvalue()
+                    
+                    # Encode as base64 data URL (consistent with PDF processor)
+                    b64_string = base64.b64encode(png_bytes).decode('utf-8')
+                    images.append(f"data:image/png;base64,{b64_string}")
+            
+            # Clean up PDF document
+            pdf_doc.close()
+            
+        finally:
+            # Clean up temporary PDF file
+            try:
+                os.unlink(pdf_path)
+                os.rmdir(os.path.dirname(pdf_path))
+            except:
+                pass  # Ignore cleanup errors
+        
+        # Add images to attachment
+        att.images.extend(images)
+        
+        # Add metadata about image extraction (consistent with PDF processor)
+        att.metadata.update({
+            'excel_sheets_rendered': len(images),
+            'excel_total_sheets': num_pages,
+            'excel_resize_applied': resize if resize else None,
+            'excel_conversion_method': 'libreoffice_to_pdf'
+        })
+        
+        return att
+        
+    except subprocess.TimeoutExpired:
+        att.metadata['excel_images_error'] = "Excel to PDF conversion timed out (>60s)"
+        return att
+    except subprocess.CalledProcessError as e:
+        att.metadata['excel_images_error'] = f"LibreOffice conversion failed: {e}"
+        return att
+    except Exception as e:
+        # Add error info to metadata instead of failing
+        att.metadata['excel_images_error'] = f"Error rendering Excel sheets: {e}"
+        return att

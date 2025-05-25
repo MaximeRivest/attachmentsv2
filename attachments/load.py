@@ -110,6 +110,17 @@ def docx_to_python_docx(att: Attachment) -> Attachment:
     return att
 
 
+@loader(match=matchers.excel_match)
+def excel_to_openpyxl(att: Attachment) -> Attachment:
+    """Load Excel workbook using openpyxl."""
+    try:
+        from openpyxl import load_workbook
+        att._obj = load_workbook(att.path, read_only=True)
+    except ImportError:
+        raise ImportError("openpyxl is required for Excel loading. Install with: pip install openpyxl")
+    return att
+
+
 @loader(match=matchers.image_match)
 def image_to_pil(att: Attachment) -> Attachment:
     """Load image using PIL."""
