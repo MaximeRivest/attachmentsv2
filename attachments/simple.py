@@ -78,6 +78,7 @@ class Attachments:
                      | load.pdf_to_pdfplumber  # PDF → pdfplumber object
                      | load.csv_to_pandas      # CSV → pandas DataFrame  
                      | load.image_to_pil       # Images → PIL Image
+                     | load.html_to_bs4        # HTML → BeautifulSoup
                      | load.url_to_bs4         # URLs → BeautifulSoup
                      | load.text_to_string     # Text → string
                      | load.zip_to_images)     # ZIP → AttachmentCollection (last)

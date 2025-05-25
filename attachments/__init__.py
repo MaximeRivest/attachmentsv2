@@ -8,6 +8,7 @@ from . import modify as _modify_module
 from . import present as _present_module
 from . import adapt as _adapt_module
 from . import refine as _refine_module
+from . import split as _split_module
 from . import matchers as _matchers_module
 
 # Import data module for sample data access
@@ -19,8 +20,9 @@ modify = SmartVerbNamespace(_modifiers)
 present = SmartVerbNamespace(_presenters)
 adapt = SmartVerbNamespace(_adapters)
 refine = SmartVerbNamespace(_refiners)
+split = SmartVerbNamespace(_modifiers)  # Split functions are also modifiers
 
 __all__ = ["Attachment", "AttachmentCollection", "attach", "A", "Pipeline",
-           "load", "modify", "present", "adapt", "refine", "data",
+           "load", "modify", "present", "adapt", "refine", "split", "data",
            "loader", "modifier", "presenter", "adapter", "refiner",
            "Attachments", "process"]

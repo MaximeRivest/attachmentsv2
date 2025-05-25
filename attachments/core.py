@@ -56,7 +56,7 @@ class Pipeline:
             if result is None:
                 # If step returns None, keep the previous result
                 continue
-            if not isinstance(result, Attachment):
+            if not isinstance(result, (Attachment, AttachmentCollection)):
                 # If step returns something else (like an adapter result), return it directly
                 # This allows adapters to "exit" the pipeline and return their result
                 return result
@@ -217,7 +217,7 @@ class Attachment:
         path = re.sub(r'\[([^:]+):([^\]]+)\]', extract_command, self.attachy).strip()
         return path, commands
     
-    def __or__(self, verb: Union[Callable, Pipeline]) -> Union['Attachment', Pipeline]:
+    def __or__(self, verb: Union[Callable, Pipeline]) -> Union['Attachment', 'AttachmentCollection', Pipeline]:
         """Support both immediate application and pipeline creation."""
         if isinstance(verb, Pipeline):
             # Apply pipeline to this attachment
@@ -229,6 +229,10 @@ class Attachment:
                 result = self
             if isinstance(result, Attachment):
                 result.pipeline.append(getattr(verb, '__name__', str(verb)))
+            elif isinstance(result, AttachmentCollection):
+                # For collections, add the pipeline step to each attachment
+                for att in result.attachments:
+                    att.pipeline.append(getattr(verb, '__name__', str(verb)))
             return result
     
     def __getattr__(self, name: str):
@@ -447,7 +451,7 @@ class VerbNamespace:
         handlers = self._registry[name]
         
         @wraps(handlers[0][1])
-        def wrapper(att: Attachment) -> Attachment:
+        def wrapper(att: Attachment) -> Union[Attachment, AttachmentCollection]:
             if att._obj is None:
                 # Use fallback handler
                 for expected_type, handler_fn in handlers:
