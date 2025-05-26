@@ -8,6 +8,17 @@ def url_match(att: 'Attachment') -> bool:
     url_pattern = r'^https?://'
     return bool(re.match(url_pattern, att.path))
 
+def webpage_match(att: 'Attachment') -> bool:
+    """Check if the attachment is a webpage URL (not a downloadable file)."""
+    if not att.path.startswith(('http://', 'https://')):
+        return False
+    
+    # Exclude URLs that end with file extensions (those go to url_to_file)
+    file_extensions = ['.pdf', '.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls', 
+                      '.csv', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.zip']
+    
+    return not any(att.path.lower().endswith(ext) for ext in file_extensions)
+
 def csv_match(att: 'Attachment') -> bool:
     return att.path.endswith('.csv')
 

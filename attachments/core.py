@@ -289,6 +289,18 @@ class Attachment:
                 # If cleanup fails, just continue
                 pass
         
+        # Clean up temporary files downloaded from URLs
+        if 'temp_file_path' in self.metadata:
+            try:
+                import os
+                temp_path = self.metadata['temp_file_path']
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                del self.metadata['temp_file_path']
+            except Exception:
+                # If cleanup fails, just continue
+                pass
+        
         # Close any open file objects
         if hasattr(self._obj, 'close'):
             try:
@@ -405,9 +417,38 @@ def presenter(func=None, *, category=None):
                 else:
                     preferred_presenter = 'markdown'  # Default
                 
-                # Skip non-preferred text presenters
-                if presenter_name in ('text', 'markdown') and presenter_name != preferred_presenter:
-                    return att
+                # Check if the preferred presenter exists for this object type
+                # If not, allow any text presenter to run (fallback behavior)
+                if presenter_name in ('text', 'markdown'):
+                    if att._obj is not None:
+                        # Check if preferred presenter exists for this object type
+                        obj_type = type(att._obj)
+                        preferred_exists = False
+                        
+                        if preferred_presenter in _presenters:
+                            for expected_type, handler_fn in _presenters[preferred_presenter]:
+                                # Skip fallback handlers (None type) - they don't count as type-specific
+                                if expected_type is None:
+                                    continue
+                                try:
+                                    if isinstance(expected_type, str):
+                                        expected_class_name = expected_type.split('.')[-1]
+                                        if expected_class_name in obj_type.__name__ or obj_type.__name__ == expected_class_name:
+                                            preferred_exists = True
+                                            break
+                                    elif isinstance(att._obj, expected_type):
+                                        preferred_exists = True
+                                        break
+                                except (TypeError, AttributeError):
+                                    continue
+                        
+                        # Only skip if preferred presenter exists AND this isn't the preferred one
+                        if preferred_exists and presenter_name != preferred_presenter:
+                            return att
+                    else:
+                        # No object loaded yet, use original filtering logic
+                        if presenter_name != preferred_presenter:
+                            return att
             
             # If we get here, the presenter should run
             return func(att, *args, **kwargs)

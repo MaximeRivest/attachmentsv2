@@ -1450,3 +1450,351 @@ def images(att: Attachment, workbook: 'openpyxl.Workbook') -> Attachment:
         # Add error info to metadata instead of failing
         att.metadata['excel_images_error'] = f"Error rendering Excel sheets: {e}"
         return att
+
+
+@presenter
+def images(att: Attachment, soup: 'bs4.BeautifulSoup') -> Attachment:
+    """Capture webpage screenshot using Playwright with JavaScript rendering and CSS selector highlighting.
+    
+    Supports DSL commands:
+    - viewport: 1280x720 for browser viewport size (default: 1280x720)
+    - fullpage: true|false for full page vs viewport screenshot (default: true)
+    - wait: 2000 for page settling time in milliseconds (default: 200)
+    - select: CSS selector to highlight elements in the screenshot
+    """
+    # First check if Playwright is available
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        att.metadata['screenshot_error'] = "Playwright not available. Install with: pip install playwright && playwright install chromium"
+        return att
+    
+    try:
+        import asyncio
+        import base64
+        
+        # Check if we have the original URL in metadata
+        if 'original_url' in att.metadata:
+            url = att.metadata['original_url']
+        else:
+            # Try to reconstruct URL from path (fallback)
+            url = att.path
+        
+        # Get DSL command parameters
+        viewport_str = att.commands.get('viewport', '1280x720')
+        fullpage = att.commands.get('fullpage', 'true').lower() == 'true'
+        wait_time = int(att.commands.get('wait', '200'))
+        
+        # Parse viewport dimensions
+        try:
+            width, height = map(int, viewport_str.split('x'))
+        except:
+            width, height = 1280, 720  # Default fallback
+        
+        async def capture_screenshot(url: str) -> str:
+            """Capture screenshot using Playwright."""
+            async with async_playwright() as p:
+                browser = await p.chromium.launch()
+                page = await browser.new_page(viewport={"width": width, "height": height})
+                
+                try:
+                    await page.goto(url, wait_until="networkidle")
+                    await page.wait_for_timeout(wait_time)  # Let fonts/images settle
+                    
+                    # Check if we have a CSS selector to highlight
+                    css_selector = att.commands.get('select')
+                    if css_selector:
+                        # Inject CSS to highlight selected elements (clean visual highlighting)
+                        highlight_css = """
+                        <style id="attachments-highlight">
+                        .attachments-highlighted {
+                            border: 5px solid #ff0080 !important;
+                            outline: 3px solid #ffffff !important;
+                            outline-offset: 2px !important;
+                            background-color: rgba(255, 0, 128, 0.1) !important;
+                            box-shadow: 
+                                0 0 0 8px rgba(255, 0, 128, 0.3),
+                                0 0 20px rgba(255, 0, 128, 0.5),
+                                inset 0 0 0 3px rgba(255, 255, 255, 0.8) !important;
+                            position: relative !important;
+                            z-index: 9999 !important;
+                            animation: attachments-glow 2s ease-in-out infinite alternate !important;
+                            margin: 10px !important;
+                            padding: 10px !important;
+                        }
+                        @keyframes attachments-glow {
+                            0% { 
+                                border-color: #ff0080;
+                                box-shadow: 
+                                    0 0 0 8px rgba(255, 0, 128, 0.3),
+                                    0 0 20px rgba(255, 0, 128, 0.5),
+                                    inset 0 0 0 3px rgba(255, 255, 255, 0.8);
+                                transform: scale(1);
+                            }
+                            100% { 
+                                border-color: #ff4da6;
+                                box-shadow: 
+                                    0 0 0 12px rgba(255, 0, 128, 0.4),
+                                    0 0 30px rgba(255, 0, 128, 0.7),
+                                    inset 0 0 0 3px rgba(255, 255, 255, 1);
+                                transform: scale(1.02);
+                            }
+                        }
+                        .attachments-highlighted::before {
+                            content: "";
+                            position: absolute !important;
+                            top: -8px !important;
+                            left: -8px !important;
+                            right: -8px !important;
+                            bottom: -8px !important;
+                            border: 3px dashed #00ff80 !important;
+                            border-radius: 8px !important;
+                            z-index: -1 !important;
+                            animation: attachments-dash 3s linear infinite !important;
+                        }
+                        @keyframes attachments-dash {
+                            0% { border-color: #00ff80; }
+                            33% { border-color: #ff0080; }
+                            66% { border-color: #0080ff; }
+                            100% { border-color: #00ff80; }
+                        }
+                        .attachments-highlighted::after {
+                            content: "🎯 SELECTED" !important;
+                            position: absolute !important;
+                            top: -45px !important;
+                            left: 50% !important;
+                            transform: translateX(-50%) !important;
+                            background: linear-gradient(135deg, #ff0080, #ff4da6) !important;
+                            color: white !important;
+                            padding: 10px 20px !important;
+                            font-size: 16px !important;
+                            font-weight: bold !important;
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                            border-radius: 25px !important;
+                            z-index: 10001 !important;
+                            white-space: nowrap !important;
+                            box-shadow: 
+                                0 6px 20px rgba(0,0,0,0.4),
+                                0 0 0 3px rgba(255, 255, 255, 1),
+                                0 0 20px rgba(255, 0, 128, 0.6) !important;
+                            border: 3px solid rgba(255, 255, 255, 1) !important;
+                            animation: attachments-badge-bounce 2s ease-in-out infinite !important;
+                        }
+                        @keyframes attachments-badge-bounce {
+                            0%, 100% { transform: translateX(-50%) translateY(0px) scale(1); }
+                            50% { transform: translateX(-50%) translateY(-5px) scale(1.05); }
+                        }
+                        /* Special styling for multiple elements */
+                        .attachments-highlighted.multiple-selection::after {
+                            background: linear-gradient(135deg, #00ff80, #26ff9a) !important;
+                        }
+                        .attachments-highlighted.multiple-selection::before {
+                            border-style: solid !important;
+                            border-width: 4px !important;
+                        }
+                        /* Ensure visibility over any background */
+                        .attachments-highlighted {
+                            backdrop-filter: blur(2px) contrast(1.2) !important;
+                        }
+                        /* Make sure text inside highlighted elements is readable */
+                        .attachments-highlighted * {
+                            text-shadow: 0 0 5px rgba(255, 255, 255, 1) !important;
+                        }
+                        /* Add a pulsing outer glow */
+                        .attachments-highlighted {
+                            filter: drop-shadow(0 0 15px rgba(255, 0, 128, 0.8)) !important;
+                        }
+                        </style>
+                        """
+                        
+                        # Inject the CSS
+                        await page.add_style_tag(content=highlight_css)
+                        
+                        # Add highlighting class to selected elements
+                        highlight_script = f"""
+                        try {{
+                            const elements = document.querySelectorAll('{css_selector}');
+                            elements.forEach((el, index) => {{
+                                el.classList.add('attachments-highlighted');
+                                
+                                // Add special class for multiple selections
+                                if (elements.length > 1) {{
+                                    el.classList.add('multiple-selection');
+                                    // Create a unique style for each element's counter
+                                    const style = document.createElement('style');
+                                    const uniqueClass = 'attachments-element-' + index;
+                                    el.classList.add(uniqueClass);
+                                    style.textContent = 
+                                        '.' + uniqueClass + '::after {{' +
+                                        'content: "🎯 ' + el.tagName.toUpperCase() + ' (' + (index + 1) + '/' + elements.length + ')" !important;' +
+                                        '}}';
+                                    document.head.appendChild(style);
+                                }} else {{
+                                    // Single element - show tag name in badge
+                                    const style = document.createElement('style');
+                                    const uniqueClass = 'attachments-element-' + index;
+                                    el.classList.add(uniqueClass);
+                                    style.textContent = 
+                                        '.' + uniqueClass + '::after {{' +
+                                        'content: "🎯 ' + el.tagName.toUpperCase() + ' SELECTED" !important;' +
+                                        '}}';
+                                    document.head.appendChild(style);
+                                }}
+                                
+                                // Scroll the first element into view for better visibility
+                                if (index === 0) {{
+                                    el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                                }}
+                            }});
+                            
+                            console.log('Highlighted ' + elements.length + ' elements with selector: {css_selector}');
+                            elements.length;
+                        }} catch (e) {{
+                            console.error('Error highlighting elements:', e);
+                            0;
+                        }}
+                        """
+                        
+                        element_count = await page.evaluate(highlight_script)
+                        
+                        # Wait longer for highlighting and animations to render
+                        await page.wait_for_timeout(500)
+                        
+                        # Store highlighting info in metadata
+                        att.metadata.update({
+                            'highlighted_selector': css_selector,
+                            'highlighted_elements': element_count
+                        })
+                    
+                    # Capture screenshot
+                    png_bytes = await page.screenshot(full_page=fullpage)
+                    
+                    # Encode as base64 data URL
+                    b64_string = base64.b64encode(png_bytes).decode('utf-8')
+                    return f"data:image/png;base64,{b64_string}"
+                    
+                finally:
+                    await browser.close()
+        
+        # Capture the screenshot with proper async handling for Jupyter
+        try:
+            # Check if we're already in an event loop (like in Jupyter)
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an event loop (Jupyter), use nest_asyncio or create_task
+                try:
+                    import nest_asyncio
+                    nest_asyncio.apply()
+                    screenshot_data = asyncio.run(capture_screenshot(url))
+                except ImportError:
+                    # nest_asyncio not available, try alternative approach
+                    # Create a new thread to run the async code
+                    import concurrent.futures
+                    import threading
+                    
+                    def run_in_thread():
+                        # Create a new event loop in this thread
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(capture_screenshot(url))
+                        finally:
+                            new_loop.close()
+                    
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(run_in_thread)
+                        screenshot_data = future.result(timeout=30)  # 30 second timeout
+                        
+            except RuntimeError:
+                # No event loop running, safe to use asyncio.run()
+                screenshot_data = asyncio.run(capture_screenshot(url))
+            
+            att.images.append(screenshot_data)
+            
+            # Add metadata about screenshot
+            att.metadata.update({
+                'screenshot_captured': True,
+                'screenshot_viewport': f"{width}x{height}",
+                'screenshot_fullpage': fullpage,
+                'screenshot_wait_time': wait_time,
+                'screenshot_url': url
+            })
+            
+        except Exception as e:
+            # Add error info to metadata instead of failing
+            att.metadata['screenshot_error'] = f"Error capturing screenshot: {str(e)}"
+        
+        return att
+        
+    except Exception as e:
+        att.metadata['screenshot_error'] = f"Error setting up screenshot: {str(e)}"
+        return att
+
+
+@presenter  
+def markdown(att: Attachment, soup: 'bs4.BeautifulSoup') -> Attachment:
+    """Convert BeautifulSoup HTML to markdown format."""
+    try:
+        # Try to use markdownify if available for better HTML->markdown conversion
+        try:
+            import markdownify
+            # Convert HTML to markdown with reasonable settings
+            markdown_text = markdownify.markdownify(
+                str(soup), 
+                heading_style="ATX",  # Use # style headings
+                bullets="-",          # Use - for bullets
+                strip=['script', 'style']  # Remove script and style tags
+            )
+            att.text += markdown_text
+        except ImportError:
+            # Fallback: basic markdown conversion
+            # Extract title
+            title = soup.find('title')
+            if title and title.get_text().strip():
+                att.text += f"# {title.get_text().strip()}\n\n"
+            
+            # Extract headings and paragraphs in order
+            for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'blockquote']):
+                tag_name = element.name
+                text = element.get_text().strip()
+                
+                if text:
+                    if tag_name == 'h1':
+                        att.text += f"# {text}\n\n"
+                    elif tag_name == 'h2':
+                        att.text += f"## {text}\n\n"
+                    elif tag_name == 'h3':
+                        att.text += f"### {text}\n\n"
+                    elif tag_name == 'h4':
+                        att.text += f"#### {text}\n\n"
+                    elif tag_name == 'h5':
+                        att.text += f"##### {text}\n\n"
+                    elif tag_name == 'h6':
+                        att.text += f"###### {text}\n\n"
+                    elif tag_name == 'p':
+                        att.text += f"{text}\n\n"
+                    elif tag_name == 'li':
+                        att.text += f"- {text}\n"
+                    elif tag_name == 'blockquote':
+                        att.text += f"> {text}\n\n"
+            
+            # Extract links
+            links = soup.find_all('a', href=True)
+            if links:
+                att.text += "\n## Links\n\n"
+                for link in links[:10]:  # Limit to first 10 links
+                    link_text = link.get_text().strip()
+                    href = link.get('href')
+                    if link_text and href:
+                        att.text += f"- [{link_text}]({href})\n"
+                if len(links) > 10:
+                    att.text += f"- ... and {len(links) - 10} more links\n"
+                att.text += "\n"
+                
+    except Exception as e:
+        # Ultimate fallback
+        att.text += f"# {att.path}\n\n"
+        att.text += soup.get_text()[:1000] + "...\n\n"
+        att.text += f"*Error converting to markdown: {e}*\n"
+    
+    return att

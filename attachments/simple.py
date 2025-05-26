@@ -20,15 +20,15 @@ def _get_namespaces():
     from attachments import load, present, refine, split
     return load, present, refine, split
 
-# Cache the namespaces
-_namespaces = None
+# Global cache for namespaces to avoid repeated imports
+_cached_namespaces = None
 
 def _get_cached_namespaces():
-    """Get cached namespaces."""
-    global _namespaces
-    if _namespaces is None:
-        _namespaces = _get_namespaces()
-    return _namespaces
+    """Get cached namespace instances for better performance."""
+    global _cached_namespaces
+    if _cached_namespaces is None:
+        _cached_namespaces = _get_namespaces()
+    return _cached_namespaces
 
 class Attachments:
     """
@@ -119,9 +119,12 @@ class Attachments:
                         | refine.add_headers)
             return processed
         else:
-            # Single file processing
+            # Single file processing with smart presenter selection
+            # Use smart presenter selection that respects DSL format commands
+            text_presenter = _get_smart_text_presenter(loaded)
+            
             processed = (loaded
-                        | (present.text + present.images + present.metadata)
+                        | (text_presenter + present.images + present.metadata)
                         | refine.add_headers)
             
             # Apply truncation only if text is very long (>5000 chars)
@@ -307,4 +310,26 @@ def process(*paths: str) -> Attachments:
         text = str(ctx)
         images = ctx.images
     """
-    return Attachments(*paths) 
+    return Attachments(*paths)
+
+def _get_smart_text_presenter(att: Attachment):
+    """Select the appropriate text presenter based on DSL format commands."""
+    load, present, refine, split = _get_cached_namespaces()
+    
+    # Get format command (default to markdown)
+    format_cmd = att.commands.get('format', 'markdown')
+    
+    # Map format commands to presenters
+    if format_cmd in ('plain', 'text', 'txt'):
+        return present.text
+    elif format_cmd in ('code', 'html', 'structured'):
+        return present.html
+    elif format_cmd in ('markdown', 'md'):
+        return present.markdown
+    elif format_cmd in ('xml',):
+        return present.xml
+    elif format_cmd in ('csv',):
+        return present.csv
+    else:
+        # Default to markdown for unknown formats
+        return present.markdown 
