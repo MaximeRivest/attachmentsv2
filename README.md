@@ -317,6 +317,7 @@ result = (attach("long_doc.txt[tokens:500]")
 - **🖼️ Images**: JPG, PNG, GIF, BMP, HEIC/HEIF (with pillow-heif)
 - **🌐 Web**: URLs (BeautifulSoup), HTML files (BeautifulSoup)
 - **📦 Archives**: ZIP → image collections
+- **🗂️ Repositories**: Git repositories with smart ignore patterns
 
 ### **Built-in Modifiers & Splitters**
 - **🔧 Object transforms**: `pages`, `limit`, `select`, `crop`, `rotate`
@@ -330,7 +331,7 @@ result = (attach("long_doc.txt[tokens:500]")
 - **📊 Analysis**: `head`, `summary`, `metadata`, `thumbnails`
 
 ### **Built-in Refiners**
-- **📝 Text**: `truncate`, `add_headers`, `format_tables`
+- **📝 Text**: `truncate`, `add_headers`, `add_repo_headers`
 - **🖼️ Images**: `tile_images`, `resize_images`
 
 ### **Built-in Adapters**
@@ -1084,7 +1085,7 @@ adapt.claude("prompt")                      # Format for API
 ## 🔗 **Links**
 
 - **📦 PyPI**: [pypi.org/project/attachments](https://pypi.org/project/attachments)
-- **💻 GitHub**: [github.com/attachments-ai/attachments](https://github.com/attachments-ai/attachments)
+- **�� GitHub**: [github.com/attachments-ai/attachments](https://github.com/attachments-ai/attachments)
 - **📖 Documentation**: [attachments.readthedocs.io](https://attachments.readthedocs.io)
 - **💬 Discord**: [discord.gg/attachments](https://discord.gg/attachments)
 - **🐦 Twitter**: [@attachments_ai](https://twitter.com/attachments_ai)
@@ -1121,3 +1122,146 @@ pip install attachments
 ```
 
 **Join the community building the future of AI file processing!** 🚀
+
+---
+
+## 🗂️ **Repository Processing**
+
+**Perfect for giving entire codebases to LLMs** - automatically process Git repositories with smart filtering and three processing modes.
+
+### **Three Processing Modes**
+
+#### **Mode 1: Structure Only** 
+Get a clean directory tree view (like `ls -alh -R`):
+
+```python
+# Just the directory structure
+structure = Attachments("path/to/repo[mode:structure]")
+print(structure)  # Clean tree view with file sizes
+```
+
+#### **Mode 2: Structure + Metadata**
+Directory tree plus Git repository information:
+
+```python
+# Structure + Git metadata
+overview = Attachments("path/to/repo[mode:metadata]")
+print(overview)  # Tree + branch, commits, author info
+```
+
+#### **Mode 3: Full Content Processing** (Default)
+Complete codebase analysis with all file contents:
+
+```python
+# Full repository processing (default mode)
+codebase = Attachments("path/to/repo")
+analysis = codebase.claude("Analyze this codebase and suggest improvements")
+
+# Or with explicit mode
+codebase = Attachments("path/to/repo[mode:content]")
+```
+
+### **Smart Ignore Patterns**
+
+Control which files are processed with flexible ignore patterns:
+
+```python
+# Standard ignore patterns (recommended)
+Attachments("repo[ignore:standard]")  # .git, node_modules, __pycache__, etc.
+
+# Use .gitignore patterns
+Attachments("repo[ignore:gitignore]")  # Respects your .gitignore file
+
+# Custom patterns
+Attachments("repo[ignore:.env,*.log,dist,build]")  # Custom comma-separated patterns
+
+# Combine with other options
+Attachments("repo[mode:content][ignore:standard][max_files:500]")
+```
+
+### **Repository Pipeline Processing**
+
+Use the grammar system for advanced repository processing:
+
+```python
+# Custom repository analysis pipeline
+codebase_analyzer = (load.repo_to_structure           # Load repo as collection
+                    | present.text                    # Extract text from each file
+                    | refine.add_repo_headers         # Add file headers with paths
+                    | refine.truncate                 # Limit content per file
+                    | adapt.claude)                   # Send to Claude
+
+# Apply to any repository
+analysis = codebase_analyzer("path/to/repo[ignore:standard]", 
+                            prompt="Review this code for security issues")
+
+# Vectorized processing - each file processed individually
+result = (attach("repo[mode:content][ignore:gitignore]")
+         | load.repo_to_structure     # → AttachmentCollection of files
+         | present.text               # Vectorized: each file → text
+         | refine.add_repo_headers    # Vectorized: each file gets headers
+         | adapt.claude("Analyze each file and summarize findings"))
+```
+
+### **Repository Examples**
+
+#### **Quick Codebase Review**
+```python
+# One-liner codebase analysis
+review = Attachments("./my-project[ignore:standard]").claude(
+    "Review this codebase for best practices and potential issues"
+)
+```
+
+#### **Documentation Generation**
+```python
+# Generate documentation from codebase
+docs = (attach("./src[mode:content][ignore:standard]")
+       | load.repo_to_structure
+       | present.text + present.metadata
+       | refine.add_repo_headers
+       | adapt.openai_chat("Generate comprehensive documentation for this codebase"))
+```
+
+#### **Code Migration Analysis**
+```python
+# Analyze codebase for migration
+migration_plan = Attachments(
+    "./legacy-app[ignore:node_modules,dist,*.log]"
+).claude("Analyze this codebase and create a plan to migrate from Vue 2 to Vue 3")
+```
+
+#### **Security Audit**
+```python
+# Security-focused repository analysis
+security_audit = (attach("./app[mode:content][ignore:standard]")
+                 | load.repo_to_structure
+                 | present.text
+                 | refine.add_repo_headers
+                 | adapt.claude("Perform a security audit of this codebase. "
+                               "Look for vulnerabilities, insecure patterns, "
+                               "and suggest improvements."))
+```
+
+### **Repository Features**
+
+- **🎯 Smart Detection**: Automatically detects Git repositories
+- **🚫 Flexible Ignoring**: Standard patterns, .gitignore, or custom rules
+- **📊 Git Integration**: Branch info, commit history, remote URLs
+- **🔄 Vectorized Processing**: Each file processed individually for scalability
+- **📝 Rich Headers**: File paths, languages, sizes automatically added
+- **⚡ Performance**: Limits file count and skips binary files
+- **🧠 LLM-Ready**: Optimized output format for code analysis
+
+### **DSL Commands for Repositories**
+
+| Command | Options | Description |
+|---------|---------|-------------|
+| `mode` | `structure`, `metadata`, `content` | Processing mode (default: content) |
+| `ignore` | `standard`, `gitignore`, `custom,patterns` | Ignore patterns (default: standard) |
+| `max_files` | `1000` | Maximum files to process (default: 1000) |
+
+**Examples**:
+- `repo[mode:structure]` - Directory tree only
+- `repo[mode:metadata][ignore:gitignore]` - Tree + Git info, use .gitignore
+- `repo[ignore:.env,*.log,node_modules][max_files:200]` - Custom ignore + limit

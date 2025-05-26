@@ -52,10 +52,60 @@ class Attachments:
                 # Create attachment and apply universal auto-pipeline
                 result = self._auto_process(attach(path))
                 
-                # Handle collections (like ZIP files)
-                if isinstance(result, AttachmentCollection):
+                # Check if this is a directory/repo that returned file paths for expansion
+                if isinstance(result, Attachment) and hasattr(result, '_file_paths'):
+                    # This is a directory/repo in 'files' mode - expand the file paths
+                    file_paths = result._file_paths
+                    
+                    # Add directory map as first attachment if there are files
+                    if file_paths:
+                        # Create a summary attachment with directory info
+                        summary_att = Attachment(path)
+                        summary_att.text = result.metadata.get('directory_map', f"Directory: {path}")
+                        summary_att.metadata = result.metadata
+                        self.attachments.append(summary_att)
+                        
+                        # Process each file individually
+                        for file_path in file_paths:
+                            try:
+                                file_result = self._auto_process(attach(file_path))
+                                
+                                # Handle collections from individual files
+                                if isinstance(file_result, AttachmentCollection):
+                                    self.attachments.extend(file_result.attachments)
+                                elif isinstance(file_result, Attachment):
+                                    # Add repository metadata to individual files
+                                    if result.metadata.get('is_git_repo'):
+                                        file_result.metadata.update({
+                                            'from_repo': True,
+                                            'repo_path': result.metadata.get('repo_path'),
+                                            'relative_path': os.path.relpath(file_path, result.metadata.get('repo_path', path))
+                                        })
+                                    else:
+                                        file_result.metadata.update({
+                                            'from_directory': True,
+                                            'directory_path': result.metadata.get('directory_path'),
+                                            'relative_path': os.path.relpath(file_path, result.metadata.get('directory_path', path))
+                                        })
+                                    self.attachments.append(file_result)
+                            except Exception as e:
+                                # Create error attachment for failed file
+                                error_att = Attachment(file_path)
+                                error_att.text = f"⚠️ Could not process {file_path}: {str(e)}"
+                                error_att.metadata = {'error': str(e), 'path': file_path}
+                                self.attachments.append(error_att)
+                    else:
+                        # No files found - just add the summary
+                        summary_att = Attachment(path)
+                        summary_att.text = f"📁 Empty directory or no matching files: {path}"
+                        summary_att.metadata = result.metadata
+                        self.attachments.append(summary_att)
+                
+                # Handle regular collections (like ZIP files)
+                elif isinstance(result, AttachmentCollection):
                     self.attachments.extend(result.attachments)
                 elif isinstance(result, Attachment):
+                    # Regular attachment (including structure/metadata modes)
                     self.attachments.append(result)
                     
             except Exception as e:
@@ -92,13 +142,15 @@ class Attachments:
         # Put more specific loaders first, more general ones last
         try:
             loaded = (att 
-                     | load.pdf_to_pdfplumber  # PDF → pdfplumber object
-                     | load.csv_to_pandas      # CSV → pandas DataFrame  
-                     | load.image_to_pil       # Images → PIL Image
-                     | load.html_to_bs4        # HTML → BeautifulSoup
-                     | load.url_to_bs4         # URLs → BeautifulSoup
-                     | load.text_to_string     # Text → string
-                     | load.zip_to_images)     # ZIP → AttachmentCollection (last)
+                     | load.git_repo_to_structure   # Git repos → structure object
+                     | load.directory_to_structure  # Directories/globs → structure object
+                     | load.pdf_to_pdfplumber       # PDF → pdfplumber object
+                     | load.csv_to_pandas           # CSV → pandas DataFrame  
+                     | load.image_to_pil            # Images → PIL Image
+                     | load.html_to_bs4             # HTML → BeautifulSoup
+                     | load.url_to_bs4              # URLs → BeautifulSoup
+                     | load.text_to_string          # Text → string
+                     | load.zip_to_images)          # ZIP → AttachmentCollection (last)
         except Exception as e:
             # If loading fails, create a basic attachment with the file content
             loaded = att
@@ -119,19 +171,33 @@ class Attachments:
                         | refine.add_headers)
             return processed
         else:
-            # Single file processing with smart presenter selection
-            # Use smart presenter selection that respects DSL format commands
-            text_presenter = _get_smart_text_presenter(loaded)
-            
-            processed = (loaded
-                        | (text_presenter + present.images + present.metadata)
-                        | refine.add_headers)
-            
-            # Apply truncation only if text is very long (>5000 chars)
-            if hasattr(processed, 'text') and processed.text and len(processed.text) > 5000:
-                processed = processed | refine.truncate(3000)
-            
-            return processed
+            # Check if this is a repository/directory structure
+            if hasattr(loaded, '_obj') and isinstance(loaded._obj, dict) and loaded._obj.get('type') in ('git_repository', 'directory'):
+                # Repository/directory structure - use mode-based presentation
+                mode = loaded.commands.get('mode', 'files')
+                
+                if mode == 'structure':
+                    processed = loaded | present.structure
+                elif mode == 'metadata':
+                    processed = loaded | present.metadata
+                else:  # mode == 'files' (default)
+                    processed = loaded | present.files
+                
+                return processed
+            else:
+                # Single file processing with smart presenter selection
+                # Use smart presenter selection that respects DSL format commands
+                text_presenter = _get_smart_text_presenter(loaded)
+                
+                processed = (loaded
+                            | (text_presenter + present.images + present.metadata)
+                            | refine.add_headers)
+                
+                # Apply truncation only if text is very long (>5000 chars)
+                if hasattr(processed, 'text') and processed.text and len(processed.text) > 5000:
+                    processed = processed | refine.truncate(3000)
+                
+                return processed
     
     def __str__(self) -> str:
         """Return all extracted text in a prompt-engineered format."""

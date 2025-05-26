@@ -1,5 +1,7 @@
 from .core import Attachment
 import re
+import os
+import glob
 
 # --- MATCHERS ---
 
@@ -43,4 +45,29 @@ def text_match(att: 'Attachment') -> bool:
 def zip_match(att: 'Attachment') -> bool:
     """Check if the attachment path is a ZIP file."""
     return att.path.lower().endswith('.zip')
+
+def git_repo_match(att: 'Attachment') -> bool:
+    """Check if path is a Git repository."""
+    # Convert to absolute path to handle relative paths like "."
+    abs_path = os.path.abspath(att.path)
+    
+    if not os.path.isdir(abs_path):
+        return False
+    
+    # Check for .git directory
+    git_dir = os.path.join(abs_path, '.git')
+    return os.path.exists(git_dir)
+
+def directory_match(att: 'Attachment') -> bool:
+    """Check if path is a directory (for recursive file collection)."""
+    abs_path = os.path.abspath(att.path)
+    return os.path.isdir(abs_path)
+
+def glob_pattern_match(att: 'Attachment') -> bool:
+    """Check if path contains glob patterns (* or ? or [])."""
+    return any(char in att.path for char in ['*', '?', '[', ']'])
+
+def directory_or_glob_match(att: 'Attachment') -> bool:
+    """Check if path is a directory or contains glob patterns."""
+    return directory_match(att) or glob_pattern_match(att)
 

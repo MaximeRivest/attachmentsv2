@@ -3,6 +3,11 @@
 from . import matchers
 from .core import Attachment, loader, AttachmentCollection
 import io
+import os
+import fnmatch
+import glob
+from pathlib import Path
+from typing import List, Dict, Any
 
 # --- URL DOWNLOADER ---
 @loader(match=matchers.url_match)
@@ -307,3 +312,554 @@ def zip_to_images(att: Attachment) -> 'AttachmentCollection':
         raise ImportError("Pillow is required for image processing. Install with: pip install Pillow")
     except Exception as e:
         raise ValueError(f"Could not load ZIP file: {e}")
+
+
+# --- DIRECTORY AND REPOSITORY PROCESSING ---
+
+@loader(match=matchers.git_repo_match)
+def git_repo_to_structure(att: Attachment) -> Attachment:
+    """Load Git repository structure and file list.
+    
+    This loader focuses on loading the repository data structure.
+    Use presenters for different output formats (structure, metadata, files).
+    """
+    import os
+    
+    # Get DSL parameters
+    ignore_cmd = att.commands.get('ignore', 'standard')
+    max_files = int(att.commands.get('max_files', '1000'))
+    glob_pattern = att.commands.get('glob', '')
+    
+    # Convert to absolute path for consistent handling
+    repo_path = os.path.abspath(att.path)
+    
+    # Get ignore patterns and collect files
+    ignore_patterns = _get_ignore_patterns(repo_path, ignore_cmd)
+    files = _collect_files(repo_path, ignore_patterns, max_files, glob_pattern)
+    
+    # Create repository structure object
+    repo_structure = {
+        'type': 'git_repository',
+        'path': repo_path,
+        'files': files,
+        'ignore_patterns': ignore_patterns,
+        'structure': _get_directory_structure(repo_path, files),
+        'metadata': _get_repo_metadata(repo_path)
+    }
+    
+    # Store the structure as the object
+    att._obj = repo_structure
+    
+    # Also store file paths for simple API access
+    att._file_paths = files
+    
+    # Update attachment metadata
+    att.metadata.update(repo_structure['metadata'])
+    att.metadata.update({
+        'file_count': len(files),
+        'ignore_patterns': ignore_patterns,
+        'is_git_repo': True
+    })
+    
+    return att
+
+
+@loader(match=matchers.directory_or_glob_match)
+def directory_to_structure(att: Attachment) -> Attachment:
+    """Load directory or glob pattern structure and file list.
+    
+    This loader focuses on loading the directory data structure.
+    Use presenters for different output formats (structure, metadata, files).
+    """
+    import os
+    
+    # Get DSL parameters
+    ignore_cmd = att.commands.get('ignore', 'minimal')  # Less aggressive for non-Git dirs
+    max_files = int(att.commands.get('max_files', '1000'))
+    glob_pattern = att.commands.get('glob', '')
+    recursive = att.commands.get('recursive', 'true').lower() == 'true'
+    
+    # Handle glob patterns in the path itself
+    if matchers.glob_pattern_match(att):
+        # Path contains glob patterns - use glob to find files
+        files = _collect_files_from_glob(att.path, max_files)
+        base_path = _get_glob_base_path(att.path)
+    else:
+        # Regular directory
+        base_path = os.path.abspath(att.path)
+        ignore_patterns = _get_ignore_patterns(base_path, ignore_cmd)
+        files = _collect_files(base_path, ignore_patterns, max_files, glob_pattern, recursive)
+    
+    # Create directory structure object
+    dir_structure = {
+        'type': 'directory',
+        'path': base_path,
+        'files': files,
+        'ignore_patterns': ignore_patterns if not matchers.glob_pattern_match(att) else [],
+        'structure': _get_directory_structure(base_path, files),
+        'metadata': _get_directory_metadata(base_path)
+    }
+    
+    # Store the structure as the object
+    att._obj = dir_structure
+    
+    # Also store file paths for simple API access
+    att._file_paths = files
+    
+    # Update attachment metadata
+    att.metadata.update(dir_structure['metadata'])
+    att.metadata.update({
+        'file_count': len(files),
+        'is_git_repo': False
+    })
+    
+    return att
+
+
+# --- HELPER FUNCTIONS ---
+
+def _get_ignore_patterns(base_path: str, ignore_command: str) -> List[str]:
+    """Get ignore patterns based on DSL command."""
+    if ignore_command == 'standard':
+        return [
+            '.git', '.git/*', '**/.git/*',
+            'node_modules', 'node_modules/*', '**/node_modules/*',
+            '__pycache__', '__pycache__/*', '**/__pycache__/*',
+            '.venv', '.venv/*', '**/.venv/*',
+            'venv', 'venv/*', '**/venv/*',
+            '.env', '.env.*',
+            '*.log', '*.tmp', '*.cache',
+            '.DS_Store', 'Thumbs.db',
+            'dist', 'build', 'target',
+            '*.pyc', '*.pyo', '*.pyd',
+            '.pytest_cache', '.coverage',
+            '.idea', '.vscode'
+        ]
+    elif ignore_command == 'minimal':
+        return [
+            '.git', '.git/*', '**/.git/*',
+            '__pycache__', '__pycache__/*', '**/__pycache__/*',
+            '*.pyc', '*.pyo', '*.pyd',
+            '.DS_Store', 'Thumbs.db'
+        ]
+    elif ignore_command == 'gitignore':
+        # Parse .gitignore file
+        gitignore_path = os.path.join(base_path, '.gitignore')
+        patterns = []
+        if os.path.exists(gitignore_path):
+            try:
+                with open(gitignore_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            patterns.append(line)
+            except Exception:
+                pass
+        return patterns
+    elif ignore_command:
+        # Custom comma-separated patterns
+        return [pattern.strip() for pattern in ignore_command.split(',')]
+    else:
+        # No ignore patterns
+        return []
+
+
+def _should_ignore(file_path: str, base_path: str, ignore_patterns: List[str]) -> bool:
+    """Check if file should be ignored based on patterns."""
+    # Get relative path from base
+    try:
+        rel_path = os.path.relpath(file_path, base_path)
+    except ValueError:
+        return True  # Outside base path, ignore
+    
+    # Normalize path separators
+    rel_path = rel_path.replace('\\', '/')
+    
+    for pattern in ignore_patterns:
+        # Handle different pattern types
+        if fnmatch.fnmatch(rel_path, pattern):
+            return True
+        if fnmatch.fnmatch(os.path.basename(rel_path), pattern):
+            return True
+        # Handle directory patterns
+        if pattern.endswith('/') and rel_path.startswith(pattern):
+            return True
+        # Handle glob patterns
+        if '**' in pattern:
+            # Convert ** patterns to fnmatch
+            glob_pattern = pattern.replace('**/', '*/')
+            if fnmatch.fnmatch(rel_path, glob_pattern):
+                return True
+    
+    return False
+
+
+def _collect_files(base_path: str, ignore_patterns: List[str], max_files: int = 1000, 
+                  glob_pattern: str = '', recursive: bool = True) -> List[str]:
+    """Collect all files in directory, respecting ignore patterns and glob filters."""
+    files = []
+    
+    if recursive:
+        # Recursive directory walk
+        for root, dirs, filenames in os.walk(base_path):
+            # Filter directories to avoid walking into ignored ones
+            dirs[:] = [d for d in dirs if not _should_ignore(os.path.join(root, d), base_path, ignore_patterns)]
+            
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                
+                # Skip if ignored
+                if _should_ignore(file_path, base_path, ignore_patterns):
+                    continue
+                
+                # Skip binary files (basic heuristic)
+                if _is_likely_binary(file_path):
+                    continue
+                
+                # Apply glob filter if specified
+                if glob_pattern and not _matches_glob_pattern(file_path, base_path, glob_pattern):
+                    continue
+                
+                files.append(file_path)
+                
+                # Limit number of files to prevent overwhelming
+                if len(files) >= max_files:
+                    break
+            
+            if len(files) >= max_files:
+                break
+    else:
+        # Non-recursive - just files in the directory
+        try:
+            for filename in os.listdir(base_path):
+                file_path = os.path.join(base_path, filename)
+                
+                # Skip directories in non-recursive mode
+                if os.path.isdir(file_path):
+                    continue
+                
+                # Skip if ignored
+                if _should_ignore(file_path, base_path, ignore_patterns):
+                    continue
+                
+                # Skip binary files
+                if _is_likely_binary(file_path):
+                    continue
+                
+                # Apply glob filter if specified
+                if glob_pattern and not _matches_glob_pattern(file_path, base_path, glob_pattern):
+                    continue
+                
+                files.append(file_path)
+                
+                if len(files) >= max_files:
+                    break
+        except OSError:
+            pass
+    
+    return sorted(files)
+
+
+def _collect_files_from_glob(glob_path: str, max_files: int = 1000) -> List[str]:
+    """Collect files using glob pattern."""
+    files = []
+    
+    try:
+        # Use glob to find matching files
+        matches = glob.glob(glob_path, recursive=True)
+        
+        for file_path in matches:
+            # Skip directories
+            if os.path.isdir(file_path):
+                continue
+            
+            # Skip binary files
+            if _is_likely_binary(file_path):
+                continue
+            
+            files.append(os.path.abspath(file_path))
+            
+            if len(files) >= max_files:
+                break
+                
+    except Exception:
+        pass
+    
+    return sorted(files)
+
+
+def _get_glob_base_path(glob_path: str) -> str:
+    """Extract base directory from glob pattern."""
+    # Find the first directory part without glob characters
+    parts = glob_path.split(os.sep)
+    base_parts = []
+    
+    for part in parts:
+        if any(char in part for char in ['*', '?', '[', ']']):
+            break
+        base_parts.append(part)
+    
+    if base_parts:
+        return os.path.join(*base_parts) if len(base_parts) > 1 else base_parts[0]
+    else:
+        return os.getcwd()
+
+
+def _matches_glob_pattern(file_path: str, base_path: str, glob_pattern: str) -> bool:
+    """Check if file matches glob pattern."""
+    rel_path = os.path.relpath(file_path, base_path)
+    filename = os.path.basename(file_path)
+    
+    # Split multiple patterns by comma
+    patterns = [p.strip() for p in glob_pattern.split(',')]
+    
+    for pattern in patterns:
+        if fnmatch.fnmatch(filename, pattern) or fnmatch.fnmatch(rel_path, pattern):
+            return True
+    
+    return False
+
+
+def _is_likely_binary(file_path: str) -> bool:
+    """Basic heuristic to detect binary files."""
+    binary_extensions = {
+        '.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o',
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg',
+        '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac',
+        '.zip', '.tar', '.gz', '.rar', '.7z',
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.pyc', '.pyo', '.pyd', '.class',
+        '.woff', '.woff2', '.ttf', '.otf', '.eot'
+    }
+    
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in binary_extensions:
+        return True
+    
+    # Check file size (skip very large files)
+    try:
+        if os.path.getsize(file_path) > 10 * 1024 * 1024:  # 10MB
+            return True
+    except OSError:
+        return True
+    
+    # Try to read first few bytes to detect binary content
+    try:
+        with open(file_path, 'rb') as f:
+            chunk = f.read(1024)
+            # If chunk contains null bytes, likely binary
+            if b'\x00' in chunk:
+                return True
+    except (OSError, UnicodeDecodeError):
+        return True
+    
+    return False
+
+
+def _get_directory_structure(base_path: str, files: List[str]) -> Dict[str, Any]:
+    """Generate tree structure representation with detailed file metadata."""
+    import stat
+    import pwd
+    import grp
+    import time
+    from datetime import datetime
+    
+    structure = {}
+    
+    # Also include directories in the structure
+    directories = set()
+    for file_path in files:
+        rel_path = os.path.relpath(file_path, base_path)
+        parts = rel_path.split(os.sep)
+        
+        # Collect all directory paths
+        for i in range(len(parts) - 1):
+            dir_path = os.path.join(base_path, *parts[:i+1])
+            directories.add(dir_path)
+    
+    # Process directories first
+    for dir_path in sorted(directories):
+        rel_path = os.path.relpath(dir_path, base_path)
+        parts = rel_path.split(os.sep)
+        
+        current = structure
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        
+        # Add directory info
+        try:
+            stat_info = os.stat(dir_path)
+            current[parts[-1]] = {
+                'type': 'directory',
+                'size': stat_info.st_size,
+                'modified': stat_info.st_mtime,
+                'permissions': stat.filemode(stat_info.st_mode),
+                'owner': _get_owner_name(stat_info.st_uid),
+                'group': _get_group_name(stat_info.st_gid),
+                'mode_octal': oct(stat_info.st_mode)[-3:],
+                'inode': stat_info.st_ino,
+                'links': stat_info.st_nlink,
+                'modified_str': datetime.fromtimestamp(stat_info.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            }
+        except OSError:
+            current[parts[-1]] = {
+                'type': 'directory', 
+                'size': 0, 
+                'modified': 0,
+                'permissions': '?---------',
+                'owner': 'unknown',
+                'group': 'unknown',
+                'mode_octal': '000',
+                'inode': 0,
+                'links': 0,
+                'modified_str': 'unknown'
+            }
+    
+    # Process files
+    for file_path in files:
+        rel_path = os.path.relpath(file_path, base_path)
+        parts = rel_path.split(os.sep)
+        
+        current = structure
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        
+        # Add file info with detailed metadata
+        try:
+            stat_info = os.stat(file_path)
+            current[parts[-1]] = {
+                'type': 'file',
+                'size': stat_info.st_size,
+                'modified': stat_info.st_mtime,
+                'permissions': stat.filemode(stat_info.st_mode),
+                'owner': _get_owner_name(stat_info.st_uid),
+                'group': _get_group_name(stat_info.st_gid),
+                'mode_octal': oct(stat_info.st_mode)[-3:],
+                'inode': stat_info.st_ino,
+                'links': stat_info.st_nlink,
+                'modified_str': datetime.fromtimestamp(stat_info.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            }
+        except OSError:
+            current[parts[-1]] = {
+                'type': 'file', 
+                'size': 0, 
+                'modified': 0,
+                'permissions': '?---------',
+                'owner': 'unknown',
+                'group': 'unknown',
+                'mode_octal': '000',
+                'inode': 0,
+                'links': 0,
+                'modified_str': 'unknown'
+            }
+    
+    return structure
+
+
+def _get_owner_name(uid: int) -> str:
+    """Get username from UID."""
+    try:
+        import pwd
+        return pwd.getpwuid(uid).pw_name
+    except (KeyError, ImportError):
+        return str(uid)
+
+
+def _get_group_name(gid: int) -> str:
+    """Get group name from GID."""
+    try:
+        import grp
+        return grp.getgrgid(gid).gr_name
+    except (KeyError, ImportError):
+        return str(gid)
+
+
+def _get_repo_metadata(repo_path: str) -> Dict[str, Any]:
+    """Extract Git repository metadata."""
+    metadata = {
+        'repo_path': repo_path,
+        'is_git_repo': True
+    }
+    
+    try:
+        # Try to get Git info using GitPython if available
+        import git
+        repo = git.Repo(repo_path)
+        
+        metadata.update({
+            'current_branch': repo.active_branch.name,
+            'commit_count': len(list(repo.iter_commits())),
+            'last_commit': {
+                'hash': repo.head.commit.hexsha[:8],
+                'message': repo.head.commit.message.strip(),
+                'author': str(repo.head.commit.author),
+                'date': repo.head.commit.committed_datetime.isoformat()
+            },
+            'remotes': [remote.name for remote in repo.remotes],
+            'is_dirty': repo.is_dirty()
+        })
+        
+        # Get remote URL if available
+        if repo.remotes:
+            try:
+                metadata['remote_url'] = repo.remotes.origin.url
+            except:
+                pass
+                
+    except ImportError:
+        # GitPython not available, use basic Git commands
+        try:
+            import subprocess
+            
+            # Get current branch
+            result = subprocess.run(['git', 'branch', '--show-current'], 
+                                  cwd=repo_path, capture_output=True, text=True)
+            if result.returncode == 0:
+                metadata['current_branch'] = result.stdout.strip()
+            
+            # Get last commit info
+            result = subprocess.run(['git', 'log', '-1', '--format=%H|%s|%an|%ai'], 
+                                  cwd=repo_path, capture_output=True, text=True)
+            if result.returncode == 0:
+                parts = result.stdout.strip().split('|')
+                if len(parts) >= 4:
+                    metadata['last_commit'] = {
+                        'hash': parts[0][:8],
+                        'message': parts[1],
+                        'author': parts[2],
+                        'date': parts[3]
+                    }
+        except Exception:
+            pass
+    except Exception:
+        pass
+    
+    return metadata
+
+
+def _get_directory_metadata(dir_path: str) -> Dict[str, Any]:
+    """Extract basic directory metadata."""
+    metadata = {
+        'directory_path': dir_path,
+        'is_git_repo': False
+    }
+    
+    try:
+        # Basic directory info
+        stat = os.stat(dir_path)
+        metadata.update({
+            'directory_name': os.path.basename(dir_path),
+            'modified': stat.st_mtime,
+            'absolute_path': os.path.abspath(dir_path)
+        })
+    except OSError:
+        pass
+    
+    return metadata
+
+
+# Formatting functions moved to present.py - removed to avoid duplication

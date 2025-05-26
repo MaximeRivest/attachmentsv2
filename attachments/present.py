@@ -1798,3 +1798,206 @@ def markdown(att: Attachment, soup: 'bs4.BeautifulSoup') -> Attachment:
         att.text += f"*Error converting to markdown: {e}*\n"
     
     return att
+
+
+# --- REPOSITORY PRESENTERS ---
+
+@presenter
+def structure(att: Attachment, repo_structure: dict) -> Attachment:
+    """Present repository/directory as a clean tree structure (like ls -alh -R)."""
+    if repo_structure.get('type') in ('git_repository', 'directory'):
+        structure = repo_structure['structure']
+        base_path = repo_structure['path']
+        
+        att.text += _format_structure_tree(structure, base_path)
+        
+        # Add summary info
+        file_count = len(repo_structure['files'])
+        att.text += f"\n*Total files: {file_count}*\n\n"
+        
+        # Remove _file_paths to prevent file expansion
+        if hasattr(att, '_file_paths'):
+            delattr(att, '_file_paths')
+        
+    return att
+
+
+@presenter
+def metadata(att: Attachment, repo_structure: dict) -> Attachment:
+    """Present repository/directory with structure + metadata information."""
+    if repo_structure.get('type') == 'git_repository':
+        # Git repository with full metadata
+        structure = repo_structure['structure']
+        repo_path = repo_structure['path']
+        repo_metadata = repo_structure['metadata']
+        
+        att.text += _format_structure_with_metadata(structure, repo_path, repo_metadata)
+        
+    elif repo_structure.get('type') == 'directory':
+        # Regular directory with basic metadata
+        structure = repo_structure['structure']
+        dir_path = repo_structure['path']
+        dir_metadata = repo_structure['metadata']
+        
+        att.text += _format_directory_with_metadata(structure, dir_path, dir_metadata)
+    
+    # Remove _file_paths to prevent file expansion
+    if hasattr(att, '_file_paths'):
+        delattr(att, '_file_paths')
+        
+    return att
+
+
+@presenter
+def files(att: Attachment, repo_structure: dict) -> Attachment:
+    """Present repository/directory as a directory map for file processing mode."""
+    if repo_structure.get('type') in ('git_repository', 'directory'):
+        base_path = repo_structure['path']
+        files = repo_structure['files']
+        
+        # Add directory map
+        att.text += _format_directory_map(base_path, files)
+        
+        # Store file paths for Attachments() to expand
+        att.metadata['file_paths'] = files
+        att.metadata['directory_map'] = _format_directory_map(base_path, files)
+        
+    return att
+
+
+# Helper functions for repository formatting (moved from load.py)
+def _format_structure_tree(structure: dict, base_path: str) -> str:
+    """Format directory structure as a tree."""
+    import os
+    
+    result = f"# Directory Structure: {os.path.basename(base_path)}\n\n"
+    result += "```\n"
+    result += f"{os.path.basename(base_path)}/\n"
+    result += _format_tree_recursive(structure, "")
+    result += "```\n\n"
+    return result
+
+
+def _format_tree_recursive(structure: dict, prefix: str = "", is_root: bool = False) -> str:
+    """Recursively format directory tree structure."""
+    result = ""
+    
+    # Handle flat structure format from _get_directory_structure
+    items = []
+    for name, item in structure.items():
+        items.append((name, item))
+    
+    # Sort items: directories first, then files
+    items.sort(key=lambda x: (x[1].get('type', 'directory') == 'file', x[0].lower()))
+    
+    for i, (name, item) in enumerate(items):
+        is_last = i == len(items) - 1
+        current_prefix = "└── " if is_last else "├── "
+        
+        if item.get('type') == 'file':
+            # File with size
+            size_str = _format_file_size(item.get('size', 0))
+            result += f"{prefix}{current_prefix}{name} ({size_str})\n"
+        else:
+            # Directory - item is a nested dictionary
+            result += f"{prefix}{current_prefix}{name}/\n"
+            # Recursively add children
+            next_prefix = prefix + ("    " if is_last else "│   ")
+            result += _format_tree_recursive(item, next_prefix)
+    
+    return result
+
+
+def _format_file_size(size_bytes: int) -> str:
+    """Format file size in human readable format."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f}{unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f}TB"
+
+
+def _format_structure_with_metadata(structure: dict, repo_path: str, metadata: dict) -> str:
+    """Format Git repository structure with metadata."""
+    import os
+    
+    result = f"# Git Repository: {os.path.basename(repo_path)}\n\n"
+    
+    # Add Git metadata
+    result += "## Repository Information\n\n"
+    if metadata.get('current_branch'):
+        result += f"**Branch**: {metadata['current_branch']}\n"
+    if metadata.get('remote_url'):
+        result += f"**Remote**: {metadata['remote_url']}\n"
+    if metadata.get('last_commit'):
+        commit = metadata['last_commit']
+        result += f"**Last Commit**: {commit['hash'][:8]} - {commit['message']}\n"
+        result += f"**Author**: {commit['author']} ({commit['date']})\n"
+    if metadata.get('commit_count'):
+        result += f"**Total Commits**: {metadata['commit_count']}\n"
+    
+    result += "\n"
+    
+    # Add directory structure
+    result += "## Directory Structure\n\n"
+    result += "```\n"
+    result += f"{os.path.basename(repo_path)}/\n"
+    result += _format_tree_recursive(structure, "")
+    result += "```\n\n"
+    
+    return result
+
+
+def _format_directory_with_metadata(structure: dict, dir_path: str, metadata: dict) -> str:
+    """Format directory structure with basic metadata."""
+    import os
+    
+    result = f"# Directory: {os.path.basename(dir_path)}\n\n"
+    
+    # Add basic metadata
+    result += "## Directory Information\n\n"
+    result += f"**Path**: {dir_path}\n"
+    if metadata.get('total_size'):
+        result += f"**Total Size**: {_format_file_size(metadata['total_size'])}\n"
+    if metadata.get('file_count'):
+        result += f"**Files**: {metadata['file_count']}\n"
+    if metadata.get('directory_count'):
+        result += f"**Directories**: {metadata['directory_count']}\n"
+    
+    result += "\n"
+    
+    # Add directory structure
+    result += "## Directory Structure\n\n"
+    result += "```\n"
+    result += f"{os.path.basename(dir_path)}/\n"
+    result += _format_tree_recursive(structure, "")
+    result += "```\n\n"
+    
+    return result
+
+
+def _format_directory_map(base_path: str, files: list) -> str:
+    """Format directory map showing file organization."""
+    import os
+    
+    result = f"## Directory Map\n\n"
+    result += f"**Base Path**: `{base_path}`\n\n"
+    result += f"**Files Found**: {len(files)}\n\n"
+    
+    if files:
+        result += "**File List**:\n"
+        for file_path in sorted(files[:20]):  # Show first 20 files
+            rel_path = os.path.relpath(file_path, base_path)
+            try:
+                size = os.path.getsize(file_path)
+                size_str = _format_file_size(size)
+                result += f"- `{rel_path}` ({size_str})\n"
+            except:
+                result += f"- `{rel_path}`\n"
+        
+        if len(files) > 20:
+            result += f"- ... and {len(files) - 20} more files\n"
+    
+    result += "\n"
+    return result
+

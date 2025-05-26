@@ -1,5 +1,6 @@
 from .core import Attachment, refiner
 from typing import Union
+import os
 
 # --- REFINERS ---
 
@@ -40,7 +41,6 @@ def add_headers(att: Attachment) -> Attachment:
         ]
         
         # Also check for just the basename in headers (in case of long paths)
-        import os
         basename = os.path.basename(filename) if filename else 'Document'
         if basename != filename:
             header_patterns.extend([
@@ -418,4 +418,120 @@ def resize_images(att: Attachment) -> Attachment:
     except ImportError:
         raise ImportError("Pillow is required for image resizing. Install with: pip install Pillow")
     except Exception as e:
-        raise ValueError(f"Could not resize images: {e}") 
+        raise ValueError(f"Could not resize images: {e}")
+
+@refiner
+def add_repo_headers(att: Attachment) -> Attachment:
+    """Add repository-aware headers to file content.
+    
+    For files from repositories, adds headers with:
+    - Relative path from repo root
+    - File type/language detection
+    - File size information
+    """
+    if not att.text:
+        return att
+    
+    # Check if this is from a repository
+    if att.metadata.get('from_repo'):
+        repo_path = att.metadata.get('repo_path', '')
+        rel_path = att.metadata.get('relative_path', att.path)
+        
+        # Detect file type/language
+        file_ext = os.path.splitext(rel_path)[1].lower()
+        language = _detect_language(file_ext)
+        
+        # Get file size
+        try:
+            file_size = os.path.getsize(att.path)
+            size_str = _format_file_size(file_size)
+        except:
+            size_str = "unknown"
+        
+        # Create header
+        header = f"## File: `{rel_path}`\n\n"
+        if language:
+            header += f"**Language**: {language}  \n"
+        header += f"**Size**: {size_str}  \n"
+        header += f"**Path**: `{rel_path}`\n\n"
+        
+        # Add separator
+        header += "```" + (language.lower() if language else "") + "\n"
+        footer = "\n```\n\n"
+        
+        att.text = header + att.text + footer
+    else:
+        # Use regular add_headers for non-repo files
+        return add_headers(att)
+    
+    return att
+
+def _detect_language(file_ext: str) -> str:
+    """Detect programming language from file extension."""
+    language_map = {
+        '.py': 'Python',
+        '.js': 'JavaScript', 
+        '.ts': 'TypeScript',
+        '.jsx': 'JSX',
+        '.tsx': 'TSX',
+        '.java': 'Java',
+        '.c': 'C',
+        '.cpp': 'C++',
+        '.cc': 'C++',
+        '.cxx': 'C++',
+        '.h': 'C Header',
+        '.hpp': 'C++ Header',
+        '.cs': 'C#',
+        '.php': 'PHP',
+        '.rb': 'Ruby',
+        '.go': 'Go',
+        '.rs': 'Rust',
+        '.swift': 'Swift',
+        '.kt': 'Kotlin',
+        '.scala': 'Scala',
+        '.sh': 'Shell',
+        '.bash': 'Bash',
+        '.zsh': 'Zsh',
+        '.fish': 'Fish',
+        '.ps1': 'PowerShell',
+        '.html': 'HTML',
+        '.htm': 'HTML',
+        '.css': 'CSS',
+        '.scss': 'SCSS',
+        '.sass': 'Sass',
+        '.less': 'Less',
+        '.xml': 'XML',
+        '.json': 'JSON',
+        '.yaml': 'YAML',
+        '.yml': 'YAML',
+        '.toml': 'TOML',
+        '.ini': 'INI',
+        '.cfg': 'Config',
+        '.conf': 'Config',
+        '.md': 'Markdown',
+        '.rst': 'reStructuredText',
+        '.txt': 'Text',
+        '.sql': 'SQL',
+        '.r': 'R',
+        '.R': 'R',
+        '.m': 'MATLAB',
+        '.pl': 'Perl',
+        '.lua': 'Lua',
+        '.vim': 'Vim Script',
+        '.dockerfile': 'Dockerfile',
+        '.makefile': 'Makefile',
+        '.cmake': 'CMake',
+        '.gradle': 'Gradle',
+        '.maven': 'Maven',
+        '.sbt': 'SBT'
+    }
+    
+    return language_map.get(file_ext, '')
+
+def _format_file_size(size_bytes: int) -> str:
+    """Format file size in human readable format."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f}{unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f}TB" 

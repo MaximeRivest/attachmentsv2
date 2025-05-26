@@ -9,7 +9,6 @@
 # and screenshot capabilities. It uses BeautifulSoup for text and Playwright for screenshots.
 
 #%%
-/home/maxime/Projects/attachmentsv2/demo_webpage_processor.py
 
 # Default processing with markdown format and screenshots
 # Note: This will try to capture a screenshot, which requires Playwright
